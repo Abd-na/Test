@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Veta Messenger</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230f766e' stroke-width='2'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- login -->
+  <section id="login" class="login" hidden>
+    <form id="loginForm" class="card login-card">
+      <div class="brand"><span class="logo" data-icon="chat"></span><strong>Veta Messenger</strong></div>
+      <p class="muted">لوحة تحكم منصة الرسائل (واتساب + SMS)</p>
+      <label for="password">كلمة مرور المدير</label>
+      <input id="password" type="password" autocomplete="current-password" required />
+      <p id="loginError" class="error" role="alert"></p>
+      <button class="btn primary" type="submit">دخول</button>
+    </form>
+  </section>
+
+  <!-- app -->
+  <div id="app" class="layout" hidden>
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><span class="logo" data-icon="chat"></span><strong>Veta Messenger</strong></div>
+      <nav id="nav">
+        <a href="#overview" data-view="overview"><span data-icon="home"></span>الرئيسية</a>
+        <a href="#whatsapp" data-view="whatsapp"><span data-icon="phone"></span>واتساب</a>
+        <a href="#devices" data-view="devices"><span data-icon="sms"></span>هواتف SMS</a>
+        <a href="#send" data-view="send"><span data-icon="send"></span>إرسال تجريبي</a>
+        <a href="#messages" data-view="messages"><span data-icon="list"></span>الرسائل</a>
+        <a href="#otp" data-view="otp"><span data-icon="shield"></span>رموز OTP</a>
+        <a href="#webhooks" data-view="webhooks"><span data-icon="hook"></span>Webhooks</a>
+        <a href="#keys" data-view="keys"><span data-icon="key"></span>مفاتيح API</a>
+        <a href="#docs" data-view="docs"><span data-icon="book"></span>طريقة الربط</a>
+      </nav>
+      <button class="btn ghost logout" id="logoutBtn" type="button"><span data-icon="logout"></span>خروج</button>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <button class="btn ghost icon-only menu" id="menuBtn" type="button" aria-label="القائمة"><span data-icon="menu"></span></button>
+        <h1 id="viewTitle"></h1>
+        <button class="btn ghost icon-only" id="refreshBtn" type="button" aria-label="تحديث"><span data-icon="refresh"></span></button>
+      </header>
+      <div id="view" class="view"></div>
+    </main>
+  </div>
+
+  <dialog id="modal">
+    <form method="dialog" class="modal-head">
+      <h2 id="modalTitle"></h2>
+      <button class="btn ghost icon-only" aria-label="إغلاق"><span data-icon="x"></span></button>
+    </form>
+    <div id="modalBody"></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

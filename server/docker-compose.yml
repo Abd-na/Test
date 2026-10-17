@@ -1,0 +1,12 @@
+# Runs next to Veta on the same server. "host" networking lets the container
+# reach Veta's MySQL on 127.0.0.1 and exposes the app on 127.0.0.1:3100 for Nginx.
+services:
+  messenger:
+    build: .
+    container_name: veta-messenger
+    restart: unless-stopped
+    network_mode: host
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    stop_grace_period: 20s

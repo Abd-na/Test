@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Veta SMS Gateway</string>
+    <string name="subtitle">حوّل هذا الهاتف إلى بوابة رسائل SMS لتطبيق فيتا</string>
+    <string name="channel_name">حالة البوابة</string>
+    <string name="status_stopped">متوقفة</string>
+    <string name="status_connecting">جارٍ الاتصال…</string>
+    <string name="status_online">متصلة وجاهزة للإرسال</string>
+    <string name="status_error">خطأ</string>
+    <string name="status_reconnecting">انقطع الاتصال، إعادة المحاولة…</string>
+    <string name="stats">اليوم: أُرسلت %1$d • فشلت %2$d • استُلمت %3$d • بانتظار الرفع %4$d</string>
+    <string name="pairing">الربط مع السيرفر</string>
+    <string name="paired_with">مربوط بـ %1$s\nالجهاز: %2$s</string>
+    <string name="not_paired">الهاتف غير مربوط. أنشئ جهازاً من لوحة التحكم وامسح رمز QR.</string>
+    <string name="scan_qr">مسح رمز QR</string>
+    <string name="manual_pair">إدخال يدوي</string>
+    <string name="unpair">إلغاء الربط</string>
+    <string name="server_url">رابط السيرفر (https://…)</string>
+    <string name="device_token">رمز الجهاز (vmd_…)</string>
+    <string name="save">حفظ</string>
+    <string name="cancel">إلغاء</string>
+    <string name="setup">الإعداد</string>
+    <string name="grant_permissions">منح صلاحيات الرسائل والإشعارات</string>
+    <string name="battery_exempt">إيقاف تحسين البطارية لهذا التطبيق</string>
+    <string name="permissions_ok">✓ كل الصلاحيات ممنوحة</string>
+    <string name="permissions_missing">صلاحيات ناقصة: %1$s</string>
+    <string name="battery_ok">✓ التطبيق مستثنى من تحسين البطارية</string>
+    <string name="battery_missing">⚠ يُنصح باستثناء التطبيق من تحسين البطارية حتى لا يتوقف</string>
+    <string name="activity">النشاط</string>
+    <string name="pair_ok">تم الربط بنجاح ✓</string>
+    <string name="pair_failed">فشل الربط: %1$s</string>
+    <string name="invalid_qr">رمز QR غير صالح</string>
+    <string name="token_invalid">رمز الجهاز غير صالح أو تم حذفه</string>
+    <string name="device_disabled">الجهاز معطّل من لوحة التحكم</string>
+    <string name="need_permissions">امنح صلاحية إرسال الرسائل أولاً</string>
+    <string name="scan_prompt">امسح رمز QR من لوحة تحكم Veta Messenger</string>
+</resources>

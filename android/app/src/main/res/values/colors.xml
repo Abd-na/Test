@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand">#FF0F766E</color>
+    <color name="status_online">#FF16A34A</color>
+    <color name="status_connecting">#FFF59E0B</color>
+    <color name="status_error">#FFDC2626</color>
+    <color name="status_stopped">#FF9CA3AF</color>
+</resources>

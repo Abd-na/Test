@@ -1,0 +1,19 @@
+# Alternative to PM2/Docker: /etc/systemd/system/veta-messenger.service
+# systemctl daemon-reload && systemctl enable --now veta-messenger
+[Unit]
+Description=Veta Messenger (WhatsApp + SMS gateway)
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/veta-messenger/server
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
