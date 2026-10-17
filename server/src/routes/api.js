@@ -102,7 +102,14 @@ router.delete(
 router.post(
   '/otp/send',
   wrap(async (req, res) => {
-    ok(res, await sendOtp(req.body, { apiKeyId: apiKeyId(req), ip: req.body?.ip ?? req.ip }), 201)
+    ok(
+      res,
+      await sendOtp(req.body, {
+        apiKeyId: apiKeyId(req),
+        ip: String(req.body?.ip ?? req.ip ?? '').slice(0, 64) || null
+      }),
+      201
+    )
   })
 )
 

@@ -61,7 +61,8 @@ export function presentMessage(row) {
     status: row.status,
     [row.direction === 'in' ? 'from' : 'to']: row.phone,
     type: row.type,
-    text: row.body,
+    // never expose OTP codes through the API, logs or webhooks
+    text: row.otp_id && row.body ? row.body.replace(/\d{4,10}/g, (m) => '•'.repeat(m.length)) : row.body,
     media_url: row.media_url,
     filename: row.filename,
     mimetype: row.mimetype,

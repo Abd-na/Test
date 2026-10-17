@@ -172,6 +172,7 @@ describe('API (MySQL)', { skip: !enabled && 'TEST_DB_DATABASE not set' }, () => 
     assert.equal(wa.status, 'failed')
     assert.equal(wa.fallback_id, sms.id)
     assert.equal(sms.status, 'sent')
+    assert.ok(!sms.text.includes(code), 'OTP code must be masked in the API')
   })
 
   test('OTP locks after too many wrong codes', async () => {
