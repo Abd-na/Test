@@ -103,8 +103,19 @@ info "dependencies installed ✓"
 
 # ---------------------------------------------------------------- 3. .env
 bold "3/7  الإعدادات / Configuration"
-env_get() { # env_get FILE KEY -> value without quotes
-  sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" "$1" | tail -n1 | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/" -e 's/[[:space:]]*$//'
+env_get() { # env_get FILE KEY -> value, parsed like Laravel/phpdotenv (quotes, \" escapes, comments)
+  node - "$1" "$2" <<'JS'
+const [file, key] = process.argv.slice(2)
+const line = require('fs').readFileSync(file, 'utf8').split(/\r?\n/).reverse()
+  .find((l) => l.replace(/^\s*export\s+/, '').trimStart().startsWith(`${key}=`))
+if (line) {
+  let v = line.slice(line.indexOf('=') + 1).trim()
+  if (v.length > 1 && v[0] === '"' && v.at(-1) === '"') v = v.slice(1, -1).replace(/\\(["\\$])/g, '$1')
+  else if (v.length > 1 && v[0] === "'" && v.at(-1) === "'") v = v.slice(1, -1)
+  else v = v.replace(/\s+#.*$/, '')
+  process.stdout.write(v)
+}
+JS
 }
 
 CREATED_ENV=0
