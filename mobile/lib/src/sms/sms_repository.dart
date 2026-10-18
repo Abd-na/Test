@@ -24,7 +24,16 @@ abstract class SmsRepository {
 }
 
 class NativeSmsRepository implements SmsRepository {
-  NativeSmsRepository() {
+  static const _methods = MethodChannel('veta/sms');
+  static const _events = EventChannel('veta/sms/events');
+  final _open = StreamController<OpenRequest>.broadcast();
+  bool _listening = false;
+
+  /// Registered on first use, never in the constructor: main() creates this
+  /// object before the Flutter binding exists (doing it earlier = black screen).
+  void _listenForOpenRequests() {
+    if (_listening) return;
+    _listening = true;
     _methods.setMethodCallHandler((call) async {
       if (call.method == 'openConversation') {
         final m = call.arguments as Map<dynamic, dynamic>;
@@ -32,10 +41,6 @@ class NativeSmsRepository implements SmsRepository {
       }
     });
   }
-
-  static const _methods = MethodChannel('veta/sms');
-  static const _events = EventChannel('veta/sms/events');
-  final _open = StreamController<OpenRequest>.broadcast();
 
   Future<T?> _call<T>(String method, [Map<String, Object?>? args]) async {
     try {
@@ -80,10 +85,14 @@ class NativeSmsRepository implements SmsRepository {
   late final Stream<void> changes = _events.receiveBroadcastStream().map((_) {});
 
   @override
-  Stream<OpenRequest> get openRequests => _open.stream;
+  Stream<OpenRequest> get openRequests {
+    _listenForOpenRequests();
+    return _open.stream;
+  }
 
   @override
   Future<OpenRequest?> consumeOpenRequest() async {
+    _listenForOpenRequests();
     final m = await _call<Map<dynamic, dynamic>>('consumeOpenRequest');
     if (m == null) return null;
     return OpenRequest(m['address'] as String? ?? '', body: m['body'] as String?);

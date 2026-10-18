@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -6,12 +8,42 @@ import 'src/gateway.dart';
 import 'src/sms/sms_repository.dart';
 
 void main() {
-  final gateway = NativeGateway();
-  final sms = NativeSmsRepository();
-  runApp(
-    GatewayApp(
-      gateway: gateway,
-      home: AppShell(gateway: gateway, sms: sms),
+  runZonedGuarded(
+    () {
+      // must run before anything touches platform channels
+      WidgetsFlutterBinding.ensureInitialized();
+      // show errors as readable text instead of a blank/black screen
+      ErrorWidget.builder = (details) => _StartupError(details.exceptionAsString());
+      final gateway = NativeGateway();
+      final sms = NativeSmsRepository();
+      runApp(
+        GatewayApp(
+          gateway: gateway,
+          home: AppShell(gateway: gateway, sms: sms),
+        ),
+      );
+    },
+    (error, stack) {
+      debugPrint('Uncaught: $error\n$stack');
+      runApp(_StartupError('$error'));
+    },
+  );
+}
+
+class _StartupError extends StatelessWidget {
+  const _StartupError(this.message);
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Directionality(
+    textDirection: TextDirection.ltr,
+    child: Container(
+      color: const Color(0xFFFFFFFF),
+      padding: const EdgeInsets.fromLTRB(16, 48, 16, 16),
+      child: Text(
+        'حدث خطأ في التطبيق / App error:\n\n$message',
+        style: const TextStyle(color: Color(0xFFB91C1C), fontSize: 14, decoration: TextDecoration.none),
+      ),
     ),
   );
 }
