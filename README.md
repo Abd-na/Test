@@ -143,7 +143,7 @@ cd server && npm run key:create -- "Veta app"
 
 الهاتف هو من يتصل بالسيرفر (long-polling)، فلا يحتاج IP ثابت ولا فتح منافذ. يُفضّل إبقاؤه على الشاحن. الرسائل الواردة على الشريحة تصل لفيتا عبر الـ webhook `message.received`، ويمكن ربط أكثر من هاتف لتوزيع الحمل.
 
-> لتثبيت تحديثات التطبيق فوق النسخة القديمة يجب أن تُوقَّع كل النسخ بنفس المفتاح. أنشئ keystore مرة واحدة وأضفه إلى GitHub Secrets: `ANDROID_KEYSTORE_BASE64`، `ANDROID_KEYSTORE_PASSWORD`، `ANDROID_KEY_ALIAS`، `ANDROID_KEY_PASSWORD`. بدونها يُستخدم مفتاح debug مؤقت (وقتها يجب حذف التطبيق قبل تثبيت نسخة جديدة).
+> **توقيع التطبيق:** كل النسخ التي يبنيها GitHub تُوقَّع بمفتاح ثابت محفوظ في الـ cache، فتُثبَّت كل نسخة جديدة فوق القديمة مباشرة. إذا ظهرت رسالة "لم يتم تثبيت التطبيق"، فاحذف التطبيق ثم ثبّت النسخة الجديدة. الـ cache يُحذف إذا لم يُبنَ التطبيق 7 أيام، فيتغيّر المفتاح. لمفتاح دائم أضف هذه الأسرار في GitHub Secrets: `ANDROID_KEYSTORE_BASE64`، `ANDROID_KEYSTORE_PASSWORD`، `ANDROID_KEY_ALIAS`، `ANDROID_KEY_PASSWORD`.
 
 ---
 

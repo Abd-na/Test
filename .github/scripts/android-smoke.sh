@@ -6,7 +6,7 @@ APK="$1"
 PKG=com.veta.smsgateway
 
 echo "::group::APK signing certificate"
-keytool -printcert -jarfile "$APK" | grep -E "SHA256|Owner" || true
+"$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner" verify --print-certs "$APK" | grep -E "SHA-256|DN" || true
 echo "::endgroup::"
 
 adb install -r "$APK" || { echo "INSTALL FAILED"; exit 1; }

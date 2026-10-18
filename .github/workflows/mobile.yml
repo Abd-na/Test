@@ -41,6 +41,24 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
 
+      # Without a release key, keep the SAME debug key across builds (cached), otherwise every
+      # build has a new signature and Android refuses to install it over the previous one.
+      - name: Restore stable signing key
+        if: env.ANDROID_KEYSTORE_PATH == ''
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
+
+      - name: Create signing key (first build only)
+        if: env.ANDROID_KEYSTORE_PATH == ''
+        run: |
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey \
+              -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Veta SMS,O=Veta,C=IQ"
+          fi
+
       - name: Build APK
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -57,6 +75,11 @@ jobs:
             echo "found $c"
           done
           rm all.dex
+
+      - name: Show signing certificate (must stay the same between versions)
+        run: |
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner
+          "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk | grep -E "SHA-256|DN"
 
       - name: Rename APK
         run: cp build/app/outputs/flutter-apk/app-release.apk veta-sms-gateway.apk

@@ -27,6 +27,11 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - name: Restore stable signing key
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
       - run: flutter build apk --release
 
       - name: Enable KVM
