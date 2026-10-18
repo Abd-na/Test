@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
@@ -18,13 +19,17 @@ object SmsSender {
     const val ACTION_SENT = "com.veta.smsgateway.SMS_SENT"
     const val ACTION_DELIVERED = "com.veta.smsgateway.SMS_DELIVERED"
     const val EXTRA_ID = "message_id"
+    const val EXTRA_URI = "store_uri"
 
     private val requestCodes = AtomicInteger((System.currentTimeMillis() % 100000).toInt())
     private val remainingParts = ConcurrentHashMap<String, Int>()
     private val firstError = ConcurrentHashMap<String, String>()
 
-    /** Ids starting with this prefix are local tests from the app and are never reported to the server. */
+    /** Ids starting with these prefixes are local (test button / chat screen) and never reported to the server. */
     const val TEST_PREFIX = "test_"
+    const val UI_PREFIX = "ui_"
+
+    fun isLocal(id: String) = id.startsWith(TEST_PREFIX) || id.startsWith(UI_PREFIX)
 
     class SendException(message: String) : Exception(message)
 
@@ -61,8 +66,9 @@ object SmsSender {
             if (subId != null) SmsManager.getSmsManagerForSubscriptionId(subId) else SmsManager.getDefault()
         }
 
-    private fun pending(context: Context, action: String, id: String): PendingIntent {
+    private fun pending(context: Context, action: String, id: String, uri: Uri?): PendingIntent {
         val intent = Intent(context, SmsResultReceiver::class.java).setAction(action).putExtra(EXTRA_ID, id)
+        if (uri != null) intent.putExtra(EXTRA_URI, uri.toString())
         // MUTABLE so the telephony stack can attach the delivery PDU / error code (explicit intent, so this is safe)
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or
             (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
@@ -79,15 +85,28 @@ object SmsSender {
         val (subId, route) = subscriptionFor(context, job.sim)
         val manager = managerFor(context, subId)
         val parts = manager.divideMessage(job.text)
+        // as the default SMS app we must record outgoing messages ourselves (Android does it for other apps)
+        val uri = SmsStore.insertOutbox(context, job.to, job.text, subId)
         remainingParts[job.id] = parts.size
         firstError.remove(job.id)
-        if (parts.size == 1) {
-            manager.sendTextMessage(job.to, null, job.text, pending(context, ACTION_SENT, job.id), pending(context, ACTION_DELIVERED, job.id))
-        } else {
-            val sent = ArrayList(parts.map { pending(context, ACTION_SENT, job.id) })
-            // delivery report only for the last part
-            val delivered = ArrayList(parts.indices.map { i -> if (i == parts.size - 1) pending(context, ACTION_DELIVERED, job.id) else null })
-            manager.sendMultipartTextMessage(job.to, null, parts, sent, delivered)
+        try {
+            if (parts.size == 1) {
+                manager.sendTextMessage(
+                    job.to, null, job.text,
+                    pending(context, ACTION_SENT, job.id, uri), pending(context, ACTION_DELIVERED, job.id, uri),
+                )
+            } else {
+                val sent = ArrayList(parts.map { pending(context, ACTION_SENT, job.id, uri) })
+                // delivery report only for the last part
+                val delivered = ArrayList(
+                    parts.indices.map { i -> if (i == parts.size - 1) pending(context, ACTION_DELIVERED, job.id, uri) else null },
+                )
+                manager.sendMultipartTextMessage(job.to, null, parts, sent, delivered)
+            }
+        } catch (e: Exception) {
+            remainingParts.remove(job.id)
+            if (uri != null) SmsStore.markSent(context, uri, ok = false)
+            throw e
         }
         return route
     }

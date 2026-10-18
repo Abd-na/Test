@@ -52,7 +52,7 @@ jobs:
       - name: Verify native gateway classes are packaged
         run: |
           unzip -p build/app/outputs/flutter-apk/app-release.apk 'classes*.dex' > all.dex
-          for c in MainActivity GatewayService SmsReceiver SmsResultReceiver BootReceiver; do
+          for c in MainActivity GatewayService SmsReceiver SmsResultReceiver BootReceiver SmsDeliverReceiver MmsReceiver RespondViaMessageService; do
             grep -qa "Lcom/veta/smsgateway/$c;" all.dex || { echo "missing $c"; exit 1; }
             echo "found $c"
           done

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Strings used by the native gateway service (the UI itself is Flutter). -->
 <resources>
-    <string name="app_name">Veta SMS Gateway</string>
+    <string name="app_name">Veta SMS</string>
     <string name="channel_name">حالة البوابة</string>
     <string name="status_connecting">جارٍ الاتصال…</string>
     <string name="status_online">متصلة وجاهزة للإرسال</string>
@@ -9,4 +9,7 @@
     <string name="not_paired">الهاتف غير مربوط. أنشئ هاتفاً من لوحة التحكم وامسح رمز QR.</string>
     <string name="token_invalid">رمز الجهاز غير صالح أو تم حذفه</string>
     <string name="device_disabled">الجهاز معطّل من لوحة التحكم</string>
+    <string name="messages_channel">الرسائل الواردة</string>
+    <string name="mms_title">رسالة وسائط (MMS)</string>
+    <string name="mms_unsupported">وصلتك رسالة MMS. هذا التطبيق لا يدعم رسائل الوسائط بعد؛ لعرضها اجعل تطبيق الرسائل الأصلي هو الافتراضي مؤقتاً.</string>
 </resources>

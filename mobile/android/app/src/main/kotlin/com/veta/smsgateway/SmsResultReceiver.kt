@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.telephony.SmsManager
 import android.telephony.SmsMessage
 
@@ -11,14 +12,16 @@ import android.telephony.SmsMessage
 class SmsResultReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = intent.getStringExtra(SmsSender.EXTRA_ID) ?: return
-        if (id.startsWith(SmsSender.TEST_PREFIX)) {
-            onTestResult(intent, id)
+        val storeUri = intent.getStringExtra(SmsSender.EXTRA_URI)?.let(Uri::parse)
+        if (SmsSender.isLocal(id)) {
+            onLocalResult(context, intent, id, storeUri)
             return
         }
         when (intent.action) {
             SmsSender.ACTION_SENT -> {
                 val error = if (resultCode == Activity.RESULT_OK) null else describe(resultCode, intent)
                 val outcome = SmsSender.onPartResult(id, error) ?: return
+                storeUri?.let { SmsStore.markSent(context, it, outcome.isEmpty(), resultCode) }
                 if (outcome.isEmpty()) {
                     PendingQueue.addStatus(context, id, "sent")
                     GatewayState.countSent()
@@ -31,6 +34,7 @@ class SmsResultReceiver : BroadcastReceiver() {
             }
             SmsSender.ACTION_DELIVERED -> {
                 if (isDelivered(intent)) {
+                    storeUri?.let { SmsStore.markDelivered(context, it) }
                     PendingQueue.addStatus(context, id, "delivered")
                     GatewayState.log("✓✓ وصلت $id")
                 }
@@ -39,15 +43,22 @@ class SmsResultReceiver : BroadcastReceiver() {
         GatewayService.wake(context)
     }
 
-    /** Local test SMS from the app: only shown in the activity log. */
-    private fun onTestResult(intent: Intent, id: String) {
+    /** Test button / chat screen messages: update the SMS store and the log, never the server. */
+    private fun onLocalResult(context: Context, intent: Intent, id: String, storeUri: Uri?) {
+        val test = id.startsWith(SmsSender.TEST_PREFIX)
         when (intent.action) {
             SmsSender.ACTION_SENT -> {
                 val error = if (resultCode == Activity.RESULT_OK) null else describe(resultCode, intent)
                 val outcome = SmsSender.onPartResult(id, error) ?: return
-                GatewayState.log(if (outcome.isEmpty()) "✓ الرسالة التجريبية أُرسلت من الشريحة" else "✗ الرسالة التجريبية فشلت: $outcome")
+                storeUri?.let { SmsStore.markSent(context, it, outcome.isEmpty(), resultCode) }
+                if (test) {
+                    GatewayState.log(if (outcome.isEmpty()) "✓ الرسالة التجريبية أُرسلت من الشريحة" else "✗ الرسالة التجريبية فشلت: $outcome")
+                }
             }
-            SmsSender.ACTION_DELIVERED -> if (isDelivered(intent)) GatewayState.log("✓✓ الرسالة التجريبية وصلت للمستلم")
+            SmsSender.ACTION_DELIVERED -> if (isDelivered(intent)) {
+                storeUri?.let { SmsStore.markDelivered(context, it) }
+                if (test) GatewayState.log("✓✓ الرسالة التجريبية وصلت للمستلم")
+            }
         }
     }
 

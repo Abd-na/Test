@@ -1,16 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'src/app_shell.dart';
 import 'src/gateway.dart';
-import 'src/home_screen.dart';
+import 'src/sms/sms_repository.dart';
 
-void main() => runApp(GatewayApp(gateway: NativeGateway()));
+void main() {
+  final gateway = NativeGateway();
+  final sms = NativeSmsRepository();
+  runApp(
+    GatewayApp(
+      gateway: gateway,
+      home: AppShell(gateway: gateway, sms: sms),
+    ),
+  );
+}
 
 class GatewayApp extends StatelessWidget {
-  const GatewayApp({super.key, required this.gateway, this.home});
+  const GatewayApp({super.key, required this.gateway, required this.home});
 
   final Gateway gateway;
-  final Widget? home;
+  final Widget home;
 
   @override
   Widget build(BuildContext context) {
@@ -19,14 +29,14 @@ class GatewayApp extends StatelessWidget {
       colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0F766E), brightness: b),
     );
     return MaterialApp(
-      title: 'Veta SMS Gateway',
+      title: 'Veta SMS',
       debugShowCheckedModeBanner: false,
       theme: theme(Brightness.light),
       darkTheme: theme(Brightness.dark),
       locale: const Locale('ar'),
       supportedLocales: const [Locale('ar'), Locale('en')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      home: home ?? HomeScreen(gateway: gateway),
+      home: home,
     );
   }
 }
