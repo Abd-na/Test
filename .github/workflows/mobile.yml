@@ -31,42 +31,51 @@ jobs:
       - run: flutter analyze
       - run: flutter test
 
-      # Optional: a stable signing key so new versions install over old ones.
-      # Add repository secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD.
-      - name: Decode signing key
+      # Every APK must be signed with the SAME key, or Android refuses to install an update
+      # over the previous version ("App not installed").
+      # Preferred: repository secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+      # ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD. Without them, a key is generated once and cached.
+      - name: Use signing key from secrets
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         if: env.KEYSTORE_BASE64 != ''
         run: |
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          {
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks"
+            echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "ANDROID_KEY_ALIAS=$KEY_ALIAS"
+            echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
 
-      # Without a release key, keep the SAME debug key across builds (cached), otherwise every
-      # build has a new signature and Android refuses to install it over the previous one.
-      - name: Restore stable signing key
+      - name: Restore cached signing key
         if: env.ANDROID_KEYSTORE_PATH == ''
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: android-debug-keystore-v1
+          path: ~/.veta-signing/veta.jks
+          key: veta-signing-key-v1
 
-      - name: Create signing key (first build only)
+      - name: Use cached signing key (created on first build)
         if: env.ANDROID_KEYSTORE_PATH == ''
         run: |
-          mkdir -p ~/.android
-          if [ ! -f ~/.android/debug.keystore ]; then
-            keytool -genkeypair -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey \
-              -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Veta SMS,O=Veta,C=IQ"
+          mkdir -p ~/.veta-signing
+          if [ ! -f ~/.veta-signing/veta.jks ]; then
+            keytool -genkeypair -keystore ~/.veta-signing/veta.jks -storepass vetasms-ci -alias veta \
+              -keypass vetasms-ci -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Veta SMS,O=Veta,C=IQ"
           fi
+          {
+            echo "ANDROID_KEYSTORE_PATH=$HOME/.veta-signing/veta.jks"
+            echo "ANDROID_KEYSTORE_PASSWORD=vetasms-ci"
+            echo "ANDROID_KEY_ALIAS=veta"
+            echo "ANDROID_KEY_PASSWORD=vetasms-ci"
+          } >> "$GITHUB_ENV"
 
       - name: Build APK
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: flutter build apk --release
 
-      # The SMS engine is native Kotlin: fail if its manifest components (names kept by R8) are missing
       - name: Verify native gateway classes are packaged
         run: |
           unzip -p build/app/outputs/flutter-apk/app-release.apk 'classes*.dex' > all.dex
