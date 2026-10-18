@@ -6,7 +6,8 @@ plugins {
 
 android {
     namespace = "com.veta.smsgateway"
-    compileSdk = flutter.compileSdkVersion
+    // permission_handler_android 14.x is built against API 37 (compileSdk only; targetSdk is unchanged)
+    compileSdk = maxOf(37, flutter.compileSdkVersion)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
