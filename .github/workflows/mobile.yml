@@ -48,6 +48,16 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: flutter build apk --release
 
+      # The SMS engine is native Kotlin: fail if any of it is missing from the APK
+      - name: Verify native gateway classes are packaged
+        run: |
+          unzip -p build/app/outputs/flutter-apk/app-release.apk 'classes*.dex' > all.dex
+          for c in MainActivity GatewayService SmsReceiver SmsResultReceiver BootReceiver SmsSender PendingQueue ApiClient; do
+            grep -qa "Lcom/veta/smsgateway/$c;" all.dex || { echo "missing $c"; exit 1; }
+            echo "found $c"
+          done
+          rm all.dex
+
       - name: Rename APK
         run: cp build/app/outputs/flutter-apk/app-release.apk veta-sms-gateway.apk
 
