@@ -3,12 +3,7 @@ node_modules/
 server/data/
 *.log
 .DS_Store
-# Android
-android/.gradle/
-android/build/
-android/app/build/
-android/local.properties
-android/.idea/
+# Android / Flutter (mobile/ has its own .gitignore too)
 *.iml
 *.apk
 *.keystore
