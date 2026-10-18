@@ -11,6 +11,10 @@ import android.telephony.SmsMessage
 class SmsResultReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = intent.getStringExtra(SmsSender.EXTRA_ID) ?: return
+        if (id.startsWith(SmsSender.TEST_PREFIX)) {
+            onTestResult(intent, id)
+            return
+        }
         when (intent.action) {
             SmsSender.ACTION_SENT -> {
                 val error = if (resultCode == Activity.RESULT_OK) null else describe(resultCode, intent)
@@ -33,6 +37,18 @@ class SmsResultReceiver : BroadcastReceiver() {
             }
         }
         GatewayService.wake(context)
+    }
+
+    /** Local test SMS from the app: only shown in the activity log. */
+    private fun onTestResult(intent: Intent, id: String) {
+        when (intent.action) {
+            SmsSender.ACTION_SENT -> {
+                val error = if (resultCode == Activity.RESULT_OK) null else describe(resultCode, intent)
+                val outcome = SmsSender.onPartResult(id, error) ?: return
+                GatewayState.log(if (outcome.isEmpty()) "✓ الرسالة التجريبية أُرسلت من الشريحة" else "✗ الرسالة التجريبية فشلت: $outcome")
+            }
+            SmsSender.ACTION_DELIVERED -> if (isDelivered(intent)) GatewayState.log("✓✓ الرسالة التجريبية وصلت للمستلم")
+        }
     }
 
     private fun isDelivered(intent: Intent): Boolean {

@@ -361,6 +361,7 @@ views.devices = {
             </div>
             <div class="row" style="margin-top:12px">
               <button class="btn sm" data-act="toggle" data-id="${esc(d.id)}" data-enabled="${d.enabled}">${d.enabled ? 'تعطيل' : 'تفعيل'}</button>
+              <button class="btn sm primary" data-act="test" data-id="${esc(d.id)}"><span data-icon="send"></span>SMS تجريبي</button>
               <button class="btn sm" data-act="rotate" data-id="${esc(d.id)}"><span data-icon="qr"></span>رمز ربط جديد</button>
               <button class="btn sm danger" data-act="delete" data-id="${esc(d.id)}" aria-label="حذف"><span data-icon="trash"></span></button>
             </div>
@@ -385,6 +386,15 @@ views.devices = {
           const id = btn.dataset.id
           if (btn.dataset.act === 'toggle')
             await api(`/v1/devices/${id}`, { method: 'PATCH', body: { enabled: btn.dataset.enabled !== 'true' } })
+          if (btn.dataset.act === 'test') {
+            const to = prompt('رقم المستلم (مثال: +9647701234567)')
+            if (!to) return
+            const msg = await api('/v1/messages', {
+              method: 'POST',
+              body: { channel: 'sms', device_id: id, to, text: 'رسالة تجريبية من Veta Messenger ✓' }
+            })
+            return trackMessage(msg.id)
+          }
           if (btn.dataset.act === 'rotate') {
             if (!confirm('سيتوقف الرمز القديم عن العمل. متابعة؟')) return
             showPairing(await api(`/v1/devices/${id}/rotate-token`, { method: 'POST' }))
@@ -415,6 +425,53 @@ function showPairing(dev) {
   )
 }
 
+const MESSAGE_HINTS = {
+  queued: 'بانتظار الإرسال. لـ SMS: الهاتف يسحب الرسائل خلال ثوانٍ إذا كان التطبيق يعمل ومتصلاً.',
+  sending: 'الهاتف استلم الرسالة ويرسلها الآن من الشريحة…',
+  sent: 'خرجت الرسالة من الشريحة/الرقم بنجاح. ننتظر تقرير الوصول (بعض الشبكات لا ترسله).',
+  delivered: 'وصلت إلى هاتف المستلم ✓',
+  read: 'قرأها المستلم ✓',
+  failed: 'فشلت. السبب في الأسفل.'
+}
+
+/** Live status of one message, so a test shows exactly where it stops. */
+function trackMessage(id) {
+  let stopped = false
+  const body = openModal(
+    'متابعة الرسالة',
+    '<div id="trackBox" class="empty">جارٍ التحميل…</div>',
+    () => {
+      stopped = true
+    }
+  )
+  const started = Date.now()
+  const poll = async () => {
+    if (stopped) return
+    try {
+      const m = await api(`/v1/messages/${id}`)
+      const box = $('#trackBox', body)
+      box.className = ''
+      box.innerHTML = `
+        <p>${channelBadge(m.channel)} ${badge(m.status)} <span class="mono small">${esc(m.to)}</span></p>
+        <p class="small">${esc(MESSAGE_HINTS[m.status] ?? '')}</p>
+        ${m.error ? `<p class="error small">${m.status === 'queued' ? 'فشلت المحاولة السابقة وستُعاد تلقائياً: ' : ''}${esc(m.error)}</p>` : ''}
+        ${m.fallback_id ? '<p class="small muted">أُعيد إرسالها عبر SMS تلقائياً.</p>' : ''}
+        ${
+          m.channel === 'sms' && m.status === 'queued' && Date.now() - started > 20000
+            ? '<p class="error small">لم يسحبها الهاتف بعد: تأكد أن التطبيق مفتوح ومفتاح التشغيل مفعّل، وأن الهاتف يظهر "متصل" في صفحة هواتف SMS.</p>'
+            : ''
+        }`
+      if (m.fallback_id) id = m.fallback_id
+      if (['delivered', 'read'].includes(m.status) && !m.fallback_id) return
+      if (m.status === 'failed' && !m.fallback_id) return
+    } catch {
+      /* keep polling */
+    }
+    if (Date.now() - started < 180000) setTimeout(poll, 2000)
+  }
+  poll()
+}
+
 views.send = {
   title: 'إرسال تجريبي',
   async render(el) {
@@ -427,7 +484,7 @@ views.send = {
             <div><label for="s_to">رقم المستلم</label><input id="s_to" name="to" dir="ltr" placeholder="+9647701234567" required /></div>
             <div><label for="s_channel">القناة</label>
               <select id="s_channel" name="channel">
-                <option value="auto">تلقائي (واتساب ثم SMS)</option>
+                <option value="auto">تلقائي (واتساب، وإن تعذر SMS)</option>
                 <option value="whatsapp">واتساب فقط</option>
                 <option value="sms">SMS فقط</option>
               </select></div>
@@ -468,7 +525,7 @@ views.send = {
         const msg = await api('/v1/messages', { method: 'POST', body: f })
         $('#sendResult', el).innerHTML =
           `<p class="small">تمت الإضافة للطابور: <code>${esc(msg.id)}</code> ${channelBadge(msg.channel)} ${badge(msg.status)}</p>`
-        toast('تمت إضافة الرسالة')
+        trackMessage(msg.id)
       })
     }
     $('#otpForm', el).onsubmit = (e) => {

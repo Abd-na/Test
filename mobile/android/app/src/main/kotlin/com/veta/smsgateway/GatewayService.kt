@@ -104,8 +104,8 @@ class GatewayService : Service() {
                     backoff = 2000L
                     for (job in jobs) {
                         try {
-                            SmsSender.send(this@GatewayService, job)
-                            GatewayState.log("↑ إرسال إلى ${job.to}")
+                            val route = SmsSender.send(this@GatewayService, job)
+                            GatewayState.log("↑ إرسال إلى ${job.to} عبر $route")
                         } catch (e: Exception) {
                             PendingQueue.addStatus(this@GatewayService, job.id, "failed", e.message ?: "send error")
                             GatewayState.countFailed()

@@ -46,6 +46,7 @@ class GatewaySnapshot {
     this.paired = false,
     this.serverUrl = '',
     this.deviceName = '',
+    this.canSendSms = true,
   });
 
   final GatewayStatus status;
@@ -59,6 +60,9 @@ class GatewaySnapshot {
   final bool paired;
   final String serverUrl;
   final String deviceName;
+
+  /// SEND_SMS as seen by the native side (the source of truth for the radio).
+  final bool canSendSms;
 
   factory GatewaySnapshot.fromMap(Map<dynamic, dynamic> m) {
     int n(String k) => (m[k] as num?)?.toInt() ?? 0;
@@ -77,6 +81,7 @@ class GatewaySnapshot {
       paired: m['paired'] == true,
       serverUrl: m['serverUrl'] as String? ?? '',
       deviceName: m['deviceName'] as String? ?? '',
+      canSendSms: m['canSendSms'] != false,
     );
   }
 }

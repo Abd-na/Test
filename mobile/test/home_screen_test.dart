@@ -47,6 +47,11 @@ class FakeGateway implements Gateway {
   Future<bool> isIgnoringBatteryOptimizations() async => true;
   @override
   Future<void> requestIgnoreBatteryOptimizations() async {}
+  @override
+  Future<String> sendTestSms(String to) async {
+    calls.add('test:$to');
+    return 'SIM1';
+  }
 }
 
 Widget app(FakeGateway g, {PairingVerifier? verify}) => GatewayApp(
@@ -87,6 +92,29 @@ void main() {
     expect(find.text('متصلة وجاهزة للإرسال'), findsOneWidget);
   });
 
+  testWidgets('test SMS goes through the native gateway', (tester) async {
+    final g = FakeGateway();
+    await tester.pumpWidget(app(g));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('إرسال رسالة تجريبية'), 200);
+    await tester.tap(find.text('إرسال رسالة تجريبية'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '+9647701234567');
+    await tester.tap(find.text('إرسال'));
+    await tester.pumpAndSettle();
+    expect(g.calls, ['test:+9647701234567']);
+    expect(find.textContaining('SIM1'), findsOneWidget);
+  });
+
+  testWidgets('warns when the phone cannot send SMS', (tester) async {
+    final g = FakeGateway();
+    await tester.pumpWidget(app(g));
+    await tester.pumpAndSettle();
+    g.emit(const GatewaySnapshot(paired: true, enabled: true, status: GatewayStatus.online, canSendSms: false));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('صلاحية إرسال الرسائل غير ممنوحة'), findsOneWidget);
+  });
+
   testWidgets('live snapshots update the screen', (tester) async {
     final g = FakeGateway();
     await tester.pumpWidget(app(g));
@@ -105,6 +133,7 @@ void main() {
     expect(find.text('خطأ'), findsOneWidget);
     expect(find.text('رمز الجهاز غير صالح'), findsOneWidget);
     expect(find.text('7'), findsOneWidget);
+    await tester.scrollUntilVisible(find.textContaining('إرسال إلى'), 200);
     expect(find.textContaining('إرسال إلى'), findsOneWidget);
   });
 }

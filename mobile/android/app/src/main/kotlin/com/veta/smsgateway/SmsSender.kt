@@ -1,12 +1,15 @@
 package com.veta.smsgateway
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
+import androidx.core.content.ContextCompat
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -20,23 +23,43 @@ object SmsSender {
     private val remainingParts = ConcurrentHashMap<String, Int>()
     private val firstError = ConcurrentHashMap<String, String>()
 
+    /** Ids starting with this prefix are local tests from the app and are never reported to the server. */
+    const val TEST_PREFIX = "test_"
+
+    class SendException(message: String) : Exception(message)
+
+    fun hasSendPermission(context: Context) =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Picks the SIM explicitly. Relying on the "default" SmsManager fails on
+     * dual-SIM phones set to "ask every time" (no default SMS SIM).
+     * Order: requested slot → system default SMS SIM → first active SIM.
+     */
     @SuppressLint("MissingPermission")
-    private fun managerFor(context: Context, sim: Int?): SmsManager {
-        var subId: Int? = null
+    private fun subscriptionFor(context: Context, sim: Int?): Pair<Int?, String> {
+        val subs = context.getSystemService(SubscriptionManager::class.java)
+        val active = runCatching { subs?.activeSubscriptionInfoList.orEmpty() }.getOrDefault(emptyList())
         if (sim != null) {
-            val subs = context.getSystemService(SubscriptionManager::class.java)
-            subId = runCatching {
-                subs?.activeSubscriptionInfoList?.firstOrNull { it.simSlotIndex == sim - 1 }?.subscriptionId
-            }.getOrNull()
+            active.firstOrNull { it.simSlotIndex == sim - 1 }?.let { return it.subscriptionId to "SIM$sim" }
         }
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val defaultSms = SubscriptionManager.getDefaultSmsSubscriptionId()
+        if (defaultSms != SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
+            val slot = active.firstOrNull { it.subscriptionId == defaultSms }?.simSlotIndex
+            return defaultSms to (if (slot != null) "SIM${slot + 1}" else "default SIM")
+        }
+        active.firstOrNull()?.let { return it.subscriptionId to "SIM${it.simSlotIndex + 1}" }
+        return null to "default SIM"
+    }
+
+    private fun managerFor(context: Context, subId: Int?): SmsManager =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val base = context.getSystemService(SmsManager::class.java)
             if (subId != null) base.createForSubscriptionId(subId) else base
         } else {
             @Suppress("DEPRECATION")
             if (subId != null) SmsManager.getSmsManagerForSubscriptionId(subId) else SmsManager.getDefault()
         }
-    }
 
     private fun pending(context: Context, action: String, id: String): PendingIntent {
         val intent = Intent(context, SmsResultReceiver::class.java).setAction(action).putExtra(EXTRA_ID, id)
@@ -46,9 +69,15 @@ object SmsSender {
         return PendingIntent.getBroadcast(context, requestCodes.incrementAndGet(), intent, flags)
     }
 
-    /** Hands the SMS to the radio. Throws if Android refuses it immediately. */
-    fun send(context: Context, job: SmsJob) {
-        val manager = managerFor(context, job.sim)
+    /**
+     * Hands the SMS to the radio and returns the SIM used (for the log).
+     * Throws SendException with a readable reason if Android refuses it immediately.
+     */
+    fun send(context: Context, job: SmsJob): String {
+        if (!hasSendPermission(context)) throw SendException("SEND_SMS permission is not granted on the phone")
+        if (job.text.isEmpty()) throw SendException("empty message")
+        val (subId, route) = subscriptionFor(context, job.sim)
+        val manager = managerFor(context, subId)
         val parts = manager.divideMessage(job.text)
         remainingParts[job.id] = parts.size
         firstError.remove(job.id)
@@ -60,6 +89,7 @@ object SmsSender {
             val delivered = ArrayList(parts.indices.map { i -> if (i == parts.size - 1) pending(context, ACTION_DELIVERED, job.id) else null })
             manager.sendMultipartTextMessage(job.to, null, parts, sent, delivered)
         }
+        return route
     }
 
     /**

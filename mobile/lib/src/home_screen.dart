@@ -162,6 +162,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await widget.gateway.setEnabled(on);
   }
 
+  Future<void> _testSms() async {
+    final controller = TextEditingController();
+    final to = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('رسالة تجريبية'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.phone,
+          textDirection: TextDirection.ltr,
+          decoration: const InputDecoration(labelText: 'رقم المستلم', hintText: '+9647701234567'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('إرسال')),
+        ],
+      ),
+    );
+    if (to == null || to.isEmpty) return;
+    try {
+      final sim = await widget.gateway.sendTestSms(to);
+      _toast('أُرسلت للشبكة عبر $sim — تابع النتيجة في سجل النشاط');
+    } catch (e) {
+      _toast('فشل الإرسال: ${e.toString().replaceFirst('Exception: ', '')}');
+    }
+  }
+
   Future<void> _unpair() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -202,6 +229,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 },
               ),
             ],
+            const SizedBox(height: 12),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text('اختبار الشريحة', style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 4),
+                    Text(
+                      'يرسل SMS مباشرة من هذا الهاتف (بدون السيرفر) للتأكد أن الشريحة والصلاحيات تعمل.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _testSms,
+                      icon: const Icon(Icons.sms_outlined),
+                      label: const Text('إرسال رسالة تجريبية'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             const SizedBox(height: 12),
             _LogCard(lines: s.log),
           ],
@@ -248,6 +298,14 @@ class _StatusCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(state.detail, style: theme.textTheme.bodySmall),
+              ),
+            if (state.paired && !state.canSendSms)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  '⚠ صلاحية إرسال الرسائل غير ممنوحة، لن تُرسل أي رسالة',
+                  style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.error),
+                ),
               ),
             const SizedBox(height: 12),
             Row(
@@ -386,8 +444,26 @@ class _SetupCard extends StatelessWidget {
             line(batteryOk, batteryOk ? 'مستثنى من تحسين البطارية' : 'يُنصح بإيقاف تحسين البطارية حتى لا يتوقف'),
             const SizedBox(height: 8),
             if (missing.isNotEmpty) FilledButton.tonal(onPressed: onRequest, child: const Text('منح الصلاحيات')),
-            if (missing.any((p) => permissions[p]?.isPermanentlyDenied ?? false))
+            if (!(permissions[Permission.sms]?.isGranted ?? false)) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.errorContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  'بدون صلاحية الرسائل لن يُرسل الهاتف أي SMS.\n'
+                  'إذا لم تظهر نافذة الصلاحية أو ظهرت رسالة "إعداد مقيَّد" (أندرويد 13 وما بعده للتطبيقات المثبتة من ملف APK):\n'
+                  '1) افتح إعدادات التطبيق بالزر أدناه\n'
+                  '2) اضغط ⋮ في الأعلى ← "السماح بالإعدادات المقيدة"\n'
+                  '3) ارجع إلى "الأذونات" ← الرسائل القصيرة ← سماح\n'
+                  'في هواتف شاومي: الأذونات ← أذونات أخرى ← "إرسال الرسائل" ← سماح.',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onErrorContainer),
+                ),
+              ),
               TextButton(onPressed: openAppSettings, child: const Text('فتح إعدادات التطبيق')),
+            ],
             if (!batteryOk) FilledButton.tonal(onPressed: onBattery, child: const Text('إيقاف تحسين البطارية')),
           ],
         ),

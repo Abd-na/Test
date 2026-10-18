@@ -71,6 +71,27 @@ class MainActivity : FlutterActivity() {
                     GatewayState.touch()
                     result.success(null)
                 }
+                "testSms" -> {
+                    val to = call.argument<String>("to").orEmpty().trim()
+                    if (to.isEmpty()) {
+                        result.error("invalid", "phone number is required", null)
+                        return@setMethodCallHandler
+                    }
+                    val job = SmsJob(
+                        id = "${SmsSender.TEST_PREFIX}${System.currentTimeMillis()}",
+                        to = to,
+                        text = call.argument<String>("text") ?: "Veta SMS Gateway ✓",
+                        sim = call.argument<Int>("sim"),
+                    )
+                    try {
+                        val route = SmsSender.send(this, job)
+                        GatewayState.log("↑ رسالة تجريبية إلى $to عبر $route")
+                        result.success(route)
+                    } catch (e: Exception) {
+                        GatewayState.log("✗ الرسالة التجريبية: ${e.message}")
+                        result.error("send_failed", e.message, null)
+                    }
+                }
                 "isIgnoringBattery" -> result.success(isIgnoringBattery())
                 "requestIgnoreBattery" -> {
                     requestBatteryExemption()
@@ -115,6 +136,7 @@ class MainActivity : FlutterActivity() {
             "paired" to prefs.isPaired,
             "serverUrl" to prefs.serverUrl,
             "deviceName" to prefs.deviceName,
+            "canSendSms" to SmsSender.hasSendPermission(this),
         )
     }
 

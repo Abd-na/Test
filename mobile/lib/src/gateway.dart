@@ -11,6 +11,9 @@ abstract class Gateway {
   Future<void> setEnabled(bool enabled);
   Future<bool> isIgnoringBatteryOptimizations();
   Future<void> requestIgnoreBatteryOptimizations();
+
+  /// Sends an SMS straight from this phone (not through the server). Returns the SIM used.
+  Future<String> sendTestSms(String to);
 }
 
 class NativeGateway implements Gateway {
@@ -42,4 +45,13 @@ class NativeGateway implements Gateway {
 
   @override
   Future<void> requestIgnoreBatteryOptimizations() => _methods.invokeMethod('requestIgnoreBattery');
+
+  @override
+  Future<String> sendTestSms(String to) async {
+    try {
+      return await _methods.invokeMethod<String>('testSms', {'to': to}) ?? '';
+    } on PlatformException catch (e) {
+      throw Exception(e.message ?? e.code);
+    }
+  }
 }
