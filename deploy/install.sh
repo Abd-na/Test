@@ -5,8 +5,11 @@
 #
 # Safe to run again: it updates the code and keeps the existing .env.
 # Every question can be answered ahead of time with an environment variable
-# (VETA_ENV, DOMAIN, COUNTRY_CODE, LE_EMAIL, DB_HOST, DB_PORT, DB_DATABASE,
-# DB_USERNAME, DB_PASSWORD, SKIP_WEB=1, SKIP_PM2_STARTUP=1, ASSUME_YES=1).
+# (DOMAIN, COUNTRY_CODE, LE_EMAIL, DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME,
+# MYSQL_ADMIN_USER, MYSQL_ADMIN_PASSWORD, SKIP_WEB=1, SKIP_PM2_STARTUP=1, ASSUME_YES=1).
+#
+# The platform gets its OWN database (default: sms_wa_gateway) and its own MySQL
+# user that can only access that database. Veta's database is never touched.
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/Abd-na/Test.git}"
@@ -103,19 +106,36 @@ info "dependencies installed ✓"
 
 # ---------------------------------------------------------------- 3. .env
 bold "3/7  الإعدادات / Configuration"
-env_get() { # env_get FILE KEY -> value, parsed like Laravel/phpdotenv (quotes, \" escapes, comments)
-  node - "$1" "$2" <<'JS'
-const [file, key] = process.argv.slice(2)
-const line = require('fs').readFileSync(file, 'utf8').split(/\r?\n/).reverse()
-  .find((l) => l.replace(/^\s*export\s+/, '').trimStart().startsWith(`${key}=`))
-if (line) {
-  let v = line.slice(line.indexOf('=') + 1).trim()
-  if (v.length > 1 && v[0] === '"' && v.at(-1) === '"') v = v.slice(1, -1).replace(/\\(["\\$])/g, '$1')
-  else if (v.length > 1 && v[0] === "'" && v.at(-1) === "'") v = v.slice(1, -1)
-  else v = v.replace(/\s+#.*$/, '')
-  process.stdout.write(v)
-}
-JS
+
+# Creates the platform's own database + user (needs MySQL admin rights once).
+create_database() {
+  command -v mysql >/dev/null || $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq default-mysql-client >/dev/null
+  local admin=() local_db=0
+  [[ "$DB_HOST" == "127.0.0.1" ]] && local_db=1
+  # Ubuntu/Debian MySQL & MariaDB let the system root in through the unix socket
+  if [[ $local_db == 1 && -z "${MYSQL_ADMIN_PASSWORD:-}" ]]; then
+    if [[ -n "$SUDO" ]]; then admin=(sudo mysql); else admin=(mysql); fi
+    "${admin[@]}" -e "SELECT 1" >/dev/null 2>&1 || admin=()
+  fi
+  if ((${#admin[@]} == 0)); then
+    info "MySQL admin access is needed once to create the database"
+    MYSQL_ADMIN_USER="${MYSQL_ADMIN_USER:-$(ask "MySQL admin user" root)}"
+    MYSQL_ADMIN_PASSWORD="${MYSQL_ADMIN_PASSWORD-$(ask_secret "MySQL password for ${MYSQL_ADMIN_USER}")}"
+    admin=(env MYSQL_PWD="$MYSQL_ADMIN_PASSWORD" mysql -u"$MYSQL_ADMIN_USER" -h "$DB_HOST" -P "$DB_PORT")
+    "${admin[@]}" -e "SELECT 1" >/dev/null || die "Cannot log in to MySQL as ${MYSQL_ADMIN_USER}"
+  fi
+  local hosts=("localhost" "127.0.0.1")
+  [[ $local_db == 1 ]] || hosts+=("%")
+  local sql="CREATE DATABASE IF NOT EXISTS \`${DB_DATABASE}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+  local h
+  for h in "${hosts[@]}"; do
+    sql+="CREATE USER IF NOT EXISTS '${DB_USERNAME}'@'${h}' IDENTIFIED BY '${DB_PASSWORD}';"
+    sql+="ALTER USER '${DB_USERNAME}'@'${h}' IDENTIFIED BY '${DB_PASSWORD}';"
+    sql+="GRANT ALL PRIVILEGES ON \`${DB_DATABASE}\`.* TO '${DB_USERNAME}'@'${h}';"
+  done
+  sql+="FLUSH PRIVILEGES;"
+  "${admin[@]}" -e "$sql" || die "Could not create database ${DB_DATABASE}"
+  info "database \`${DB_DATABASE}\` and user '${DB_USERNAME}' ready (access limited to this database) ✓"
 }
 
 CREATED_ENV=0
@@ -132,34 +152,15 @@ if [[ -f .env ]]; then
   fi
 else
   CREATED_ENV=1
-  # Find Veta's Laravel .env to reuse its database credentials
-  VETA_ENV="${VETA_ENV:-}"
-  if [[ -z "$VETA_ENV" ]]; then
-    for f in /var/www/*/.env /var/www/*/*/.env /home/*/*/.env /srv/*/.env; do
-      [[ -r "$f" ]] && grep -q '^DB_DATABASE=' "$f" 2>/dev/null && { VETA_ENV="$f"; break; }
-    done
-    VETA_ENV="$(ask "مسار ملف .env الخاص بفيتا / Path to Veta's .env (empty = enter DB manually)" "$VETA_ENV")"
-  fi
-  if [[ -n "$VETA_ENV" && ! -r "$VETA_ENV" ]]; then
-    VETA_ENV_TMP="$(mktemp)"
-    $SUDO cat "$VETA_ENV" >"$VETA_ENV_TMP" 2>/dev/null || die "Cannot read $VETA_ENV"
-    VETA_ENV="$VETA_ENV_TMP"
-  fi
-  if [[ -n "$VETA_ENV" ]]; then
-    DB_HOST="${DB_HOST:-$(env_get "$VETA_ENV" DB_HOST)}"
-    DB_PORT="${DB_PORT:-$(env_get "$VETA_ENV" DB_PORT)}"
-    DB_DATABASE="${DB_DATABASE:-$(env_get "$VETA_ENV" DB_DATABASE)}"
-    DB_USERNAME="${DB_USERNAME:-$(env_get "$VETA_ENV" DB_USERNAME)}"
-    DB_PASSWORD="${DB_PASSWORD:-$(env_get "$VETA_ENV" DB_PASSWORD)}"
-    info "database settings read from Veta: ${DB_USERNAME}@${DB_HOST}:${DB_PORT:-3306}/${DB_DATABASE}"
-    [[ -n "${VETA_ENV_TMP:-}" ]] && rm -f "$VETA_ENV_TMP"
-  fi
-  DB_HOST="${DB_HOST:-$(ask "DB host" 127.0.0.1)}"
-  DB_PORT="${DB_PORT:-3306}"
-  DB_DATABASE="${DB_DATABASE:-$(ask "DB name (Veta's database)" veta)}"
-  DB_USERNAME="${DB_USERNAME:-$(ask "DB user")}"
-  DB_PASSWORD="${DB_PASSWORD-$(ask_secret "DB password")}"
+  DB_HOST="${DB_HOST:-127.0.0.1}"
   [[ "$DB_HOST" == "localhost" ]] && DB_HOST=127.0.0.1
+  DB_PORT="${DB_PORT:-3306}"
+  DB_DATABASE="${DB_DATABASE:-sms_wa_gateway}"
+  DB_USERNAME="${DB_USERNAME:-sms_wa_gateway}"
+  [[ "$DB_DATABASE" =~ ^[A-Za-z0-9_]{1,64}$ && "$DB_USERNAME" =~ ^[A-Za-z0-9_]{1,32}$ ]] ||
+    die "DB_DATABASE / DB_USERNAME may only contain letters, digits and _"
+  DB_PASSWORD="$(openssl rand -hex 24)"
+  create_database
 
   DOMAIN="${DOMAIN-$(ask "النطاق الفرعي للمنصة / Subdomain for the platform, e.g. msg.veta.com (empty = use server IP)")}"
   COUNTRY_CODE="${COUNTRY_CODE:-$(ask "رمز الدولة للأرقام المحلية / Country code for local numbers" 964)}"
@@ -203,13 +204,13 @@ PORT="$(sed -n 's/^PORT=//p' .env)"
 PORT="${PORT:-3100}"
 
 # ---------------------------------------------------------------- 4. database
-bold "4/7  قاعدة البيانات / Database (tables prefixed vm_)"
+bold "4/7  قاعدة البيانات / Database ($(sed -n 's/^DB_DATABASE=//p' .env))"
 node --input-type=module -e "
 import { migrate, pool } from './src/lib/db.js'
 try { await migrate(); console.log('  • connected and migrated ✓') }
 catch (e) { console.error('  ✗ ' + e.message); process.exitCode = 1 }
 finally { await pool.end() }
-" || die "Database check failed. Fix DB_* in ${APP_DIR}/server/.env (the user needs CREATE TABLE rights) and run the installer again."
+" || die "Database check failed. Check DB_* in ${APP_DIR}/server/.env and run the installer again."
 
 # ---------------------------------------------------------------- 5. process manager
 bold "5/7  التشغيل الدائم / PM2"

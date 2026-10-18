@@ -3,8 +3,8 @@ import { config } from '../config.js'
 import { logger } from './logger.js'
 
 /**
- * All tables live in Veta's own MySQL database and are prefixed with `vm_`
- * (Veta Messenger) so they never collide with the application's tables.
+ * The platform uses its own database (default `sms_wa_gateway`), separate from
+ * Veta's. Tables are prefixed with `vm_` (Veta Messenger).
  */
 export const pool = mysql.createPool({
   ...config.db,

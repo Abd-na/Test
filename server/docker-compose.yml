@@ -1,5 +1,5 @@
 # Runs next to Veta on the same server. "host" networking lets the container
-# reach Veta's MySQL on 127.0.0.1 and exposes the app on 127.0.0.1:3100 for Nginx.
+# reach the server's MySQL on 127.0.0.1 and exposes the app on 127.0.0.1:3100 for Nginx.
 services:
   messenger:
     build: .

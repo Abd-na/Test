@@ -39,7 +39,7 @@ export const config = {
     port: int('DB_PORT', 3306),
     user: str('DB_USERNAME', str('DB_USER', 'root')),
     password: str('DB_PASSWORD'),
-    database: str('DB_DATABASE', str('DB_NAME', 'veta')),
+    database: str('DB_DATABASE', str('DB_NAME', 'sms_wa_gateway')),
     socketPath: str('DB_SOCKET') || undefined,
     connectionLimit: int('DB_POOL_SIZE', 10)
   },

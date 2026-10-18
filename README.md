@@ -1,6 +1,6 @@
 # Veta Messenger
 
-منصة رسائل خاصة بك (بديل Hypersender) تعمل على نفس سيرفر **فيتا** وتستخدم **نفس قاعدة بيانات MySQL**، لإرسال واستقبال رسائل **واتساب** و**SMS** بدون أي اشتراك شهري.
+منصة رسائل خاصة بك (بديل Hypersender) تعمل على نفس سيرفر **فيتا** بقاعدة بيانات **مستقلة** اسمها `sms_wa_gateway` (على نفس خادم MySQL، دون لمس قاعدة فيتا)، لإرسال واستقبال رسائل **واتساب** و**SMS** بدون أي اشتراك شهري.
 
 - **واتساب:** تربط رقمك عن طريق مسح QR (مثل واتساب ويب) عبر مكتبة [Baileys](https://github.com/WhiskeySockets/Baileys). تستطيع ربط أكثر من رقم.
 - **SMS:** هاتف أندرويد فيه شريحة يتحول إلى بوابة باستخدام تطبيق **Veta SMS Gateway** (Flutter) الموجود في هذا المستودع. الرسائل تُرسل من رصيد الشريحة.
@@ -11,7 +11,7 @@
 
 ```
  تطبيق فيتا ──(API key)──▶  Veta Messenger  ──▶ واتساب (رقمك المربوط)
-     ▲                      │   MySQL (جداول vm_*)
+     ▲                      │   MySQL: قاعدة sms_wa_gateway
      └──── webhooks ◀───────┤
                             └──◀ long-poll ── هاتف أندرويد (تطبيق Veta SMS Gateway) ──▶ SMS
 ```
@@ -37,9 +37,9 @@
 curl -fsSL https://raw.githubusercontent.com/Abd-na/Test/claude/fervent-ride-xm2fik/deploy/install.sh | bash
 ```
 السكربت يقوم بكل الخطوات التالية تلقائياً:
-- يقرأ بيانات قاعدة البيانات من ملف `.env` الخاص بفيتا.
+- ينشئ قاعدة بيانات مستقلة `sms_wa_gateway` ومستخدماً خاصاً بها لا يستطيع الوصول إلا إليها. يدخل إلى MySQL كمدير تلقائياً عبر `sudo`، وإن لم ينجح يطلب كلمة مرور root لـ MySQL مرة واحدة.
 - يثبّت Node.js و PM2 إن لم يكونا موجودين.
-- ينشئ جداول `vm_*`.
+- ينشئ جداول المنصة داخلها.
 - يجهّز Nginx (أو Apache إن كان فيتا يعمل عليه) مع شهادة SSL مجانية.
 - يطبع في النهاية **كلمة مرور لوحة التحكم** و**مفتاح API**.
 
@@ -49,7 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/Abd-na/Test/claude/fervent-ride-xm2
 
 ### المتطلبات
 - Node.js 20.12 أو أحدث (يُنصح بـ 22) **أو** Docker
-- MySQL 5.7+/8 أو MariaDB 10.4+ (نفس قاعدة فيتا)
+- MySQL 5.7+/8 أو MariaDB 10.4+ (نفس الخادم الذي يستخدمه فيتا، بقاعدة بيانات منفصلة)
 - Nginx (موجود غالباً لفيتا)
 
 ### 1) تنزيل المنصة
@@ -61,20 +61,27 @@ cp .env.example .env
 ```
 
 ### 2) الإعداد (`server/.env`)
-انسخ بيانات قاعدة البيانات من ملف `.env` الخاص بفيتا:
+أنشئ قاعدة البيانات والمستخدم أولاً (مرة واحدة):
+```sql
+CREATE DATABASE sms_wa_gateway CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'sms_wa_gateway'@'localhost' IDENTIFIED BY 'كلمة-مرور-قوية';
+CREATE USER 'sms_wa_gateway'@'127.0.0.1' IDENTIFIED BY 'كلمة-مرور-قوية';
+GRANT ALL ON sms_wa_gateway.* TO 'sms_wa_gateway'@'localhost', 'sms_wa_gateway'@'127.0.0.1';
+```
+ثم في `.env`:
 ```env
 PUBLIC_URL=https://msg.veta.example.com
 APP_SECRET=        # openssl rand -hex 32
 ADMIN_PASSWORD=    # كلمة مرور لوحة التحكم
 
 DB_HOST=127.0.0.1
-DB_DATABASE=veta
-DB_USERNAME=veta
-DB_PASSWORD=...
+DB_DATABASE=sms_wa_gateway
+DB_USERNAME=sms_wa_gateway
+DB_PASSWORD=كلمة-مرور-قوية
 
 DEFAULT_COUNTRY_CODE=964   # رمز دولتك للأرقام التي تبدأ بـ 0
 ```
-> الجداول تُنشأ تلقائياً عند أول تشغيل وكلها تبدأ بـ `vm_` (مثل `vm_messages`، `vm_otps`) فلا تتعارض مع جداول فيتا. مستخدم قاعدة البيانات يحتاج صلاحية `CREATE` وقت أول تشغيل.
+> الجداول تُنشأ تلقائياً عند أول تشغيل (مثل `vm_messages`، `vm_otps`).
 
 ### 3) التشغيل — اختر طريقة واحدة
 
@@ -200,7 +207,7 @@ TEST_DB_HOST=127.0.0.1 TEST_DB_USERNAME=root TEST_DB_PASSWORD=... TEST_DB_DATABA
 ```
 
 ## النسخ الاحتياطي والأمان
-- كل شيء (الرسائل، الرموز، جلسات واتساب) داخل جداول `vm_*` في قاعدة فيتا، فيشمله النسخ الاحتياطي المعتاد. الوسائط في `server/data/media`.
+- كل شيء (الرسائل، الرموز، جلسات واتساب) داخل قاعدة `sms_wa_gateway`. أضفها إلى نسخك الاحتياطي: `mysqldump sms_wa_gateway > backup.sql`. الوسائط في `server/data/media`.
 - جلسات واتساب في `vm_wa_auth` تعادل تسجيل الدخول لحسابك، فاحمِ قاعدة البيانات.
 - مفاتيح API ورموز الهواتف ورموز OTP تُخزن كبصمات فقط.
 - لوحة التحكم محمية بكلمة مرور مع حد لمحاولات الدخول. يمكنك أيضاً تقييد `/` في Nginx على IP مكتبك، مع ترك `/api/` و`/media/` مفتوحة.
