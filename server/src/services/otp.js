@@ -18,6 +18,7 @@ export const sendSchema = z.object({
     .regex(/^[\w.:-]+$/)
     .default('default'),
   length: z.number().int().min(4).max(10).optional(),
+  alphabet: z.enum(['digits', 'letters', 'letters_upper', 'alnum', 'alnum_upper']).default('digits'),
   expires_in: z.number().int().min(30).max(3600).optional(),
   template: z.string().max(1000).optional(),
   instance_id: z.string().optional(),
@@ -33,8 +34,20 @@ export const verifySchema = z.object({
 
 const codeHash = (otpId, code) => hmac(`otp:${otpId}:${code}`)
 
-function generateCode(length) {
-  return String(crypto.randomInt(0, 10 ** length)).padStart(length, '0')
+const ALPHABETS = {
+  digits: '0123456789',
+  letters: 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ',
+  letters_upper: 'ABCDEFGHJKLMNPQRSTUVWXYZ',
+  // no 0/O, 1/I/l: easy to read and type
+  alnum: '23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ',
+  alnum_upper: '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'
+}
+
+function generateCode(length, alphabet = 'digits') {
+  const chars = ALPHABETS[alphabet]
+  let code = ''
+  for (let i = 0; i < length; i++) code += chars[crypto.randomInt(0, chars.length)]
+  return code
 }
 
 function present(row) {
@@ -54,7 +67,8 @@ function present(row) {
   }
 }
 
-export async function sendOtp(body, { apiKeyId, ip } = {}) {
+/** `revealCode` returns the code to the caller (Hypersender-compatible API only). */
+export async function sendOtp(body, { apiKeyId, ip, revealCode = false } = {}) {
   const parsed = sendSchema.safeParse(body)
   if (!parsed.success) throw badRequest('Invalid OTP request', parsed.error.issues)
   const input = parsed.data
@@ -86,7 +100,7 @@ export async function sendOtp(body, { apiKeyId, ip } = {}) {
 
   const length = input.length ?? config.otp.length
   const ttl = input.expires_in ?? config.otp.ttlSec
-  const code = generateCode(length)
+  const code = generateCode(length, input.alphabet)
   const id = newId('otp')
   const expiresAt = new Date(now.getTime() + ttl * 1000)
   const text = (input.template || config.otp.template)
@@ -146,7 +160,9 @@ export async function sendOtp(body, { apiKeyId, ip } = {}) {
     fallback_channel: message.fallback_channel,
     message_id: message.id,
     expires_at: expiresAt,
-    resend_after: config.otp.resendCooldownSec
+    created_at: now,
+    resend_after: config.otp.resendCooldownSec,
+    ...(revealCode ? { code } : {})
   }
 }
 

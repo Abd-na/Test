@@ -8,6 +8,7 @@ import apiRoutes from './routes/api.js'
 import deviceRoutes from './routes/device.js'
 import adminRoutes from './routes/admin.js'
 import mediaRoutes from './routes/media.js'
+import hypersenderRoutes from './routes/hypersender.js'
 
 export function createApp() {
   const app = express()
@@ -26,6 +27,8 @@ export function createApp() {
   app.use('/api/v1', apiRoutes)
   app.use('/api/device/v1', deviceRoutes)
   app.use('/media', mediaRoutes)
+  // drop-in replacement for app.hypersender.com (/api/whatsapp/v2, /api/sms/v1, /api/otp/v2)
+  app.use('/api', hypersenderRoutes)
   app.use(express.static(path.join(config.root, 'public'), { index: 'index.html', maxAge: '1h' }))
 
   app.use('/api', (_req, res) => {

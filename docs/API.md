@@ -185,3 +185,27 @@ X-Veta-Signature: sha256=<hex>
 | `GET /outbox?wait=25&limit=5` | long-poll: ينتظر حتى تتوفر رسائل ويحجزها للهاتف |
 | `POST /status` `{ "id", "status": "sent|delivered|failed", "error" }` | نتيجة الإرسال (أو `{ "updates": [...] }`) |
 | `POST /inbox` `{ "from", "text", "received_at", "sim" }` | رسالة SMS واردة (أو `{ "messages": [...] }`) |
+
+---
+
+## واجهة متوافقة مع Hypersender
+
+نفس مسارات وصيغ `app.hypersender.com`، لتعمل التطبيقات المبنية على Hypersender (ومكتبة `hypersender/hypersender-laravel`) دون أي تعديل. المصادقة بمفتاح Veta Messenger: `Authorization: Bearer vk_live_...`. قيمة `{instance}` يمكن أن تكون أي شيء؛ وإن كانت معرّف رقم واتساب أو هاتف SMS عندنا فسيُستخدم ذلك الرقم أو الهاتف تحديداً.
+
+| المسار | الوصف |
+|---|---|
+| `POST /api/whatsapp/v2/{instance}/send-text` · `send-text-safe` | `{chatId, text}` ← رد بصيغة Baileys `{key:{id}, status:"PENDING"}` |
+| `POST /api/whatsapp/v2/{instance}/send-image` · `send-file` · `send-video` · `send-voice` | `{chatId, url \| file (multipart), caption, filename, mimetype}` |
+| `POST /api/whatsapp/v2/{instance}/send-location` | `{chatId, latitude, longitude, title}` |
+| `POST /api/whatsapp/v2/{instance}/send-seen` · `read-chat` · `start-typing` · `stop-typing` | تُقبل دون أن تفعل شيئاً `{result:true}` |
+| `POST /api/sms/v1/{instance}/send-message` | `{content, to, request_id, schedule_send_at, max_send_attempts, message_expiration_seconds}` |
+| `GET /api/sms/v1/{instance}/messages` · `message-threads` · `heartbeats` | قوائم مقسّمة إلى صفحات `{data, links, meta}` |
+| `DELETE /api/sms/v1/{instance}/delete-message?message_id=` | إلغاء رسالة ما زالت في الطابور |
+| `POST /api/otp/v2/{instance}/request-code` | `{chatId, length, useNumber, useLetter, allCapital, name, expires}` ← يرجع `data.code` و`data.uuid` |
+| `POST /api/otp/v2/{instance}/validate-code` | `{chatId, code}` ← 200 `status: validated` أو 422 |
+
+- **الأخطاء:** بصيغة Hypersender `{message, errors}`. الرقم الذي ليس على واتساب يرجع 422، وعدم وجود رقم واتساب متصل يرجع 503، والميزات غير المدعومة ترجع 501.
+- **الـ Webhooks:** أنشئها بـ `"format": "hypersender"` و`"channel": "whatsapp" | "sms"` و`"secret": "..."`. السر يُرسل كما هو في الهيدر `Authorization`.
+- **الأحداث المرسلة:**
+  - واتساب: `message.any` و`message.ack`.
+  - SMS: `message.phone.sent` و`message.phone.delivered` و`message.phone.received` و`message.send.failed` و`phone.heartbeat.online` و`phone.heartbeat.offline`.

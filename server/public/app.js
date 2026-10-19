@@ -648,6 +648,22 @@ views.webhooks = {
         <form id="hookForm">
           <label for="h_url">الرابط (في تطبيق فيتا)</label>
           <input id="h_url" name="url" dir="ltr" placeholder="https://veta.example.com/webhooks/messenger" required />
+          <div class="form-grid">
+            <div><label for="h_format">التنسيق</label>
+              <select id="h_format" name="format">
+                <option value="veta">Veta Messenger (موقّع بـ X-Veta-Signature)</option>
+                <option value="hypersender">Hypersender (للتطبيقات التي كانت تستخدم Hypersender)</option>
+              </select></div>
+            <div><label for="h_channel">القناة</label>
+              <select id="h_channel" name="channel">
+                <option value="">واتساب و SMS</option>
+                <option value="whatsapp">واتساب فقط</option>
+                <option value="sms">SMS فقط</option>
+              </select></div>
+            <div><label for="h_secret">مفتاح السر (اختياري)</label>
+              <input id="h_secret" name="secret" dir="ltr" placeholder="يُولَّد تلقائياً" minlength="8" /></div>
+          </div>
+          <p class="small muted">لتنسيق Hypersender: أنشئ webhook لواتساب وآخر لـ SMS بنفس روابط Hypersender القديمة في فيتا، وضع في "مفتاح السر" قيمة <code>HYPERSENDER_WHATSAPP_WEBHOOK_AUTHORIZATION_SECRET</code> أو <code>HYPERSENDER_SMS_WEBHOOK_AUTHORIZATION_SECRET</code> من ملف .env في فيتا.</p>
           <label>الأحداث</label>
           <div class="checks">
             <label><input type="checkbox" name="events" value="*" checked /> كل الأحداث</label>
@@ -661,8 +677,11 @@ views.webhooks = {
           (h) => `
         <div class="card">
           <div class="row spread"><code>${esc(h.url)}</code>${h.enabled ? '<span class="badge ok">مفعل</span>' : '<span class="badge">معطل</span>'}</div>
-          <p class="small muted">${h.events.map((e) => `<span class="mono">${esc(e)}</span>`).join(' • ')}</p>
-          <label>مفتاح التوقيع (للتحقق من الهيدر X-Veta-Signature)</label>
+          <p class="small muted">
+            ${h.format === 'hypersender' ? '<span class="badge info">تنسيق Hypersender</span>' : ''}
+            ${h.channel ? `<span class="badge">${h.channel === 'sms' ? 'SMS فقط' : 'واتساب فقط'}</span>` : ''}
+            ${h.events.map((e) => `<span class="mono">${esc(e)}</span>`).join(' • ')}</p>
+          <label>${h.format === 'hypersender' ? 'مفتاح السر (يُرسل في الهيدر Authorization)' : 'مفتاح التوقيع (للتحقق من الهيدر X-Veta-Signature)'}</label>
           <div class="secret"><code>${esc(h.secret)}</code>${copyButton(h.secret)}</div>
           <div class="row" style="margin-top:12px">
             <button class="btn sm" data-act="test" data-id="${esc(h.id)}">إرسال حدث تجريبي</button>
@@ -680,7 +699,13 @@ views.webhooks = {
       guarded(e.submitter, async () => {
         await api('/v1/webhooks', {
           method: 'POST',
-          body: { url: e.target.url.value, events: events.includes('*') ? ['*'] : events }
+          body: {
+            url: e.target.url.value,
+            events: events.includes('*') ? ['*'] : events,
+            format: e.target.format.value,
+            channel: e.target.channel.value || null,
+            ...(e.target.secret.value.trim() ? { secret: e.target.secret.value.trim() } : {})
+          }
         })
         toast('تمت إضافة الـ Webhook')
         refresh()

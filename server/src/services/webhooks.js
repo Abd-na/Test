@@ -5,6 +5,7 @@ import { hmac } from '../lib/crypto.js'
 import { bus, EVENTS } from '../lib/events.js'
 import { badRequest, notFound } from '../lib/errors.js'
 import { logger } from '../lib/logger.js'
+import { eventChannel, hypersenderTestEvent, toHypersenderWebhook } from './hypersender.js'
 
 /**
  * Outgoing webhooks. Every delivery is persisted first and then sent by a
@@ -26,7 +27,12 @@ export const webhookSchema = z.object({
     .default(['*']),
   description: z.string().max(255).optional(),
   instance_id: z.string().max(40).nullable().optional(),
-  enabled: z.boolean().optional()
+  enabled: z.boolean().optional(),
+  // "hypersender": Hypersender payloads + plain "Authorization: <secret>" header (drop-in for its SDK)
+  format: z.enum(['veta', 'hypersender']).default('veta'),
+  channel: z.enum(['whatsapp', 'sms']).nullable().optional(),
+  // custom secret, e.g. the HYPERSENDER_*_WEBHOOK_AUTHORIZATION_SECRET already configured in the app
+  secret: z.string().min(8).max(100).optional()
 })
 
 function present(row, { withSecret = false } = {}) {
@@ -37,6 +43,8 @@ function present(row, { withSecret = false } = {}) {
     events: parseJson(row.events, []),
     instance_id: row.instance_id,
     enabled: Boolean(row.enabled),
+    format: row.format ?? 'veta',
+    channel: row.channel ?? null,
     ...(withSecret ? { secret: row.secret } : {}),
     created_at: row.created_at,
     updated_at: row.updated_at
@@ -52,9 +60,11 @@ export async function createWebhook(body) {
     url: parsed.data.url,
     description: parsed.data.description ?? null,
     events: JSON.stringify(parsed.data.events),
-    secret: `whsec_${randomString(32)}`,
+    secret: parsed.data.secret ?? `whsec_${randomString(32)}`,
     instance_id: parsed.data.instance_id ?? null,
     enabled: parsed.data.enabled === false ? 0 : 1,
+    format: parsed.data.format,
+    channel: parsed.data.channel ?? null,
     created_at: now,
     updated_at: now
   }
@@ -76,7 +86,7 @@ export async function listWebhooks() {
 
 export async function updateWebhook(id, body) {
   await getRow(id)
-  const parsed = webhookSchema.partial().safeParse(body)
+  const parsed = webhookSchema.partial().safeParse({ format: undefined, ...body })
   if (!parsed.success) throw badRequest('Invalid webhook', parsed.error.issues)
   const d = parsed.data
   const fields = { updated_at: new Date() }
@@ -85,6 +95,9 @@ export async function updateWebhook(id, body) {
   if (d.description !== undefined) fields.description = d.description
   if (d.instance_id !== undefined) fields.instance_id = d.instance_id
   if (d.enabled !== undefined) fields.enabled = d.enabled ? 1 : 0
+  if (body?.format !== undefined) fields.format = d.format
+  if (d.channel !== undefined) fields.channel = d.channel
+  if (d.secret) fields.secret = d.secret
   if (body?.rotate_secret) fields.secret = `whsec_${randomString(32)}`
   await exec('UPDATE vm_webhooks SET ? WHERE id = ?', [fields, id])
   return getWebhook(id)
@@ -129,6 +142,7 @@ const matches = (hook, event, data) => {
   const events = parseJson(hook.events, [])
   if (!events.includes('*') && !events.includes(event)) return false
   if (hook.instance_id && data?.instance_id && hook.instance_id !== data.instance_id) return false
+  if (hook.channel && eventChannel(event, data) !== hook.channel) return false
   return true
 }
 
@@ -138,14 +152,22 @@ async function enqueue(event, data, onlyWebhookId = null) {
     : await query('SELECT * FROM vm_webhooks WHERE enabled = 1')
   const now = new Date()
   const targets = onlyWebhookId ? hooks : hooks.filter((h) => matches(h, event, data))
+  let queued = 0
   for (const hook of targets) {
     const id = newId('evt')
-    const payload = { id, event, created_at: now.toISOString(), data }
+    let payload = { id, event, created_at: now.toISOString(), data }
+    let eventName = event
+    if (hook.format === 'hypersender') {
+      payload = event === 'webhook.test' ? hypersenderTestEvent(hook.channel) : await toHypersenderWebhook(event, data)
+      if (!payload) continue // no Hypersender equivalent (e.g. otp.verified)
+      eventName = payload.event
+    }
+    queued++
     await exec('INSERT INTO vm_webhook_deliveries SET ?', [
       {
         id,
         webhook_id: hook.id,
-        event,
+        event: eventName,
         payload: JSON.stringify(payload),
         status: 'pending',
         next_attempt_at: now,
@@ -154,8 +176,8 @@ async function enqueue(event, data, onlyWebhookId = null) {
       }
     ])
   }
-  if (targets.length) schedule(10)
-  return targets.length
+  if (queued) schedule(10)
+  return queued
 }
 
 export async function sendTestEvent(webhookId) {
@@ -185,11 +207,14 @@ async function deliver(delivery) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
+        accept: 'application/json',
         'user-agent': 'VetaMessenger-Webhook/1.0',
         'x-veta-event': delivery.event,
         'x-veta-delivery': delivery.id,
         'x-veta-timestamp': timestamp,
-        'x-veta-signature': signPayload(hook.secret, timestamp, delivery.payload)
+        'x-veta-signature': signPayload(hook.secret, timestamp, delivery.payload),
+        // Hypersender's SDK compares this header with its configured authorization secret
+        ...(hook.format === 'hypersender' ? { authorization: hook.secret } : {})
       },
       body: delivery.payload,
       signal: AbortSignal.timeout(TIMEOUT_MS),

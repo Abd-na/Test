@@ -173,7 +173,7 @@ export async function enqueueMessage(body, { apiKeyId = null, internal = {} } = 
     extra: json(Object.keys(extra).length ? extra : null),
     status: 'queued',
     priority: internal.priority ?? input.priority ?? 0,
-    max_attempts: config.messages.maxAttempts,
+    max_attempts: internal.max_attempts ?? config.messages.maxAttempts,
     fallback_channel: fallback,
     parent_id: internal.parent_id ?? null,
     otp_id: internal.otp_id ?? null,

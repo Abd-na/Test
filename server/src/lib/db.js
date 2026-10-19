@@ -211,6 +211,14 @@ const MIGRATIONS = [
         KEY vm_webhook_deliveries_hook (webhook_id, created_at)
       ) ${TABLE}`
     ]
+  },
+  {
+    // Hypersender-compatible webhooks: payload format, channel filter, plain Authorization secret
+    id: '002_webhook_format',
+    statements: [
+      "ALTER TABLE vm_webhooks ADD COLUMN format VARCHAR(20) NOT NULL DEFAULT 'veta'",
+      'ALTER TABLE vm_webhooks ADD COLUMN channel VARCHAR(10) NULL'
+    ]
   }
 ]
 

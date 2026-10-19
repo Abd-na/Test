@@ -18,6 +18,7 @@
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc14",
     "express": "^5.3.0",
+    "multer": "^2.4.0",
     "mysql2": "^3.24.6",
     "pino": "^10.4.0",
     "qrcode": "^1.5.4",

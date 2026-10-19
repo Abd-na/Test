@@ -183,6 +183,42 @@ cd server && npm run key:create -- "Veta app"
 
 ---
 
+## الانتقال من Hypersender بدون تعديل كود فيتا
+
+المنصة تفهم نفس API الخاص بـ Hypersender، بنفس المسارات والطلبات والردود والـ webhooks. لذلك إذا كان فيتا يستخدم Hypersender (عبر مكتبة `hypersender/hypersender-laravel` أو طلبات HTTP مباشرة)، فلا تحتاج لتغيير الكود الذي يرسل الرسائل.
+
+**1) تحويل الطلبات:** انسخ محتوى `boot()` من `examples/laravel/HypersenderToVetaMessenger.php` إلى `app/Providers/AppServiceProvider.php` في فيتا. هذا يحوّل أي طلب ذاهب إلى `app.hypersender.com` إلى سيرفرك. هذه الخطوة ضرورية لأن مكتبة Hypersender تكتب عنوان الـ SMS بشكل ثابت ولا تقرأه من `.env`. تحتاج Laravel 10.14 أو أحدث.
+
+**2) ملف `.env` في فيتا:**
+```env
+VETA_MESSENGER_URL=https://msg.veta.example.com
+HYPERSENDER_WHATSAPP_API_KEY=vk_live_...   # مفتاح API من لوحة Veta Messenger
+HYPERSENDER_SMS_API_KEY=vk_live_...
+HYPERSENDER_OTP_API_KEY=vk_live_...
+# HYPERSENDER_*_INSTANCE_ID اتركها كما هي (أي قيمة تعمل)
+```
+وفي `config/services.php` أضف: `'veta_messenger' => ['url' => env('VETA_MESSENGER_URL')]`، ثم نفّذ `php artisan config:clear`.
+
+**3) الـ Webhooks:** من لوحة التحكم ← Webhooks أنشئ اثنين بتنسيق **Hypersender**:
+
+| القناة | الرابط (نفس رابط Hypersender في فيتا) | مفتاح السر |
+|---|---|---|
+| واتساب | `https://veta.example.com/whatsapp/webhook` | قيمة `HYPERSENDER_WHATSAPP_WEBHOOK_AUTHORIZATION_SECRET` |
+| SMS | `https://veta.example.com/sms/webhook` | قيمة `HYPERSENDER_SMS_WEBHOOK_AUTHORIZATION_SECRET` (الافتراضي في المكتبة `x-sms-webhook`) |
+
+الأحداث تصل بنفس أسماء Hypersender: `message.any`، `message.ack`، `message.phone.sent`، `message.phone.delivered`، `message.phone.received`، `message.send.failed`، `phone.heartbeat.online`/`offline`.
+
+**ما المدعوم:**
+- **واتساب:** `send-text`، `send-text-safe`، `send-image`، `send-file`، `send-video`، `send-voice` (برابط أو برفع ملف)، `send-location`. أما `send-seen` و`read-chat` و`start-typing` و`stop-typing` فتُقبل دون أن تفعل شيئاً.
+  - إذا لم يكن الرقم على واتساب يرجع الخطأ 422 بنفس رسالة Hypersender.
+- **SMS:** `send-message` (يدعم `request_id` و`schedule_send_at` و`max_send_attempts` و`message_expiration_seconds`)، و`messages`، و`delete-message`، و`message-threads`، و`heartbeats`.
+- **OTP:** `request-code` (أرقام أو حروف) و`validate-code`. الرمز يُرسل عبر واتساب، وإن تعذر يتحول تلقائياً إلى SMS. هذه ميزة إضافية لا يقدمها Hypersender.
+- **غير مدعوم:** الاستطلاعات (polls)، والتفاعلات، والتمييز بنجمة، والحذف، والتحويل (forward)، وروابط OTP (`generate-link`). هذه ترجع الخطأ 501.
+
+قيمة `expires` في OTP: إن كانت 60 أو أقل تُعتبر دقائق، وإن زادت تُعتبر ثوانٍ، لأن Hypersender لا يوثّق الوحدة.
+
+---
+
 ## الاستخدام من فيتا (Laravel)
 
 1. انسخ `examples/laravel/VetaMessenger.php` إلى `app/Services/`.
