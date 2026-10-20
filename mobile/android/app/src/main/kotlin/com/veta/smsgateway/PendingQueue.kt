@@ -6,7 +6,8 @@ import org.json.JSONObject
 
 /**
  * Status reports and incoming SMS waiting to reach the server. Persisted so
- * nothing is lost if the network is down or the app restarts.
+ * nothing is lost if the network is down or the app restarts. Each line (SIM
+ * pairing) has its own queue since it reports to its own server device.
  */
 object PendingQueue {
     private const val FILE = "pending"
@@ -24,25 +25,32 @@ object PendingQueue {
         prefs(c).edit().putString(key, trimmed.toString()).apply()
     }
 
+    /** The "any SIM" line keeps the keys used before dual-SIM support, so nothing queued is lost on update. */
+    private fun key(kind: String, line: String) = if (line == Prefs.ANY) kind else "${kind}_$line"
+
     @Synchronized
-    fun addStatus(c: Context, id: String, status: String, error: String? = null) {
-        val arr = read(c, "statuses")
+    fun addStatus(c: Context, line: String, id: String, status: String, error: String? = null) {
+        val k = key("statuses", line)
+        val arr = read(c, k)
         arr.put(JSONObject().put("id", id).put("status", status).apply { if (error != null) put("error", error) })
-        write(c, "statuses", arr)
+        write(c, k, arr)
     }
 
     @Synchronized
-    fun addInbox(c: Context, from: String, text: String, receivedAt: Long, sim: Int?) {
-        val arr = read(c, "inbox")
+    fun addInbox(c: Context, line: String, from: String, text: String, receivedAt: Long, sim: Int?) {
+        val k = key("inbox", line)
+        val arr = read(c, k)
         arr.put(JSONObject().put("from", from).put("text", text).put("received_at", receivedAt).apply {
             if (sim != null) put("sim", sim)
         })
-        write(c, "inbox", arr)
+        write(c, k, arr)
     }
 
-    /** Sends everything queued; items that fail stay for the next try. */
-    fun flush(c: Context, api: ApiClient) {
-        val statuses = synchronized(this) { read(c, "statuses").also { write(c, "statuses", JSONArray()) } }
+    /** Sends everything queued for [line]; items that fail stay for the next try. */
+    fun flush(c: Context, line: String, api: ApiClient) {
+        val statusKey = key("statuses", line)
+        val inboxKey = key("inbox", line)
+        val statuses = synchronized(this) { read(c, statusKey).also { write(c, statusKey, JSONArray()) } }
         val remaining = JSONArray()
         for (i in 0 until statuses.length()) {
             val o = statuses.getJSONObject(i)
@@ -54,16 +62,16 @@ object PendingQueue {
                 remaining.put(o)
             }
         }
-        requeue(c, "statuses", remaining)
+        requeue(c, statusKey, remaining)
 
-        val inbox = synchronized(this) { read(c, "inbox").also { write(c, "inbox", JSONArray()) } }
+        val inbox = synchronized(this) { read(c, inboxKey).also { write(c, inboxKey, JSONArray()) } }
         if (inbox.length() > 0) {
             try {
                 api.pushInbox(inbox)
             } catch (e: ApiException) {
-                if (e.code >= 500) requeue(c, "inbox", inbox)
+                if (e.code >= 500) requeue(c, inboxKey, inbox)
             } catch (e: Exception) {
-                requeue(c, "inbox", inbox)
+                requeue(c, inboxKey, inbox)
             }
         }
     }
@@ -76,5 +84,13 @@ object PendingQueue {
         write(c, key, items)
     }
 
-    fun size(c: Context) = read(c, "statuses").length() + read(c, "inbox").length()
+    fun size(c: Context) = Prefs(c).pairings.sumOf { p ->
+        read(c, key("statuses", p.line)).length() + read(c, key("inbox", p.line)).length()
+    }
+
+    /** Drops what is queued for a line that was unpaired (its server device can't take it anymore). */
+    @Synchronized
+    fun clear(c: Context, line: String) {
+        prefs(c).edit().remove(key("statuses", line)).remove(key("inbox", line)).apply()
+    }
 }

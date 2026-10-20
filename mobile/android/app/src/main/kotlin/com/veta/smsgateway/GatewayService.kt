@@ -19,8 +19,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -28,13 +33,16 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * Foreground service that keeps a long-poll connection to the server, sends
  * the SMS it receives, and pushes status reports + incoming SMS back.
+ * Each pairing (one per SIM on dual-SIM phones) gets its own loops, so every
+ * SIM works as a separate device on the server.
  */
 class GatewayService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var pollJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
-    private val flushSignal = Channel<Unit>(Channel.CONFLATED)
+    /** Bumped to make every line flush its pending reports right away. */
+    private val flushTick = MutableStateFlow(0L)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -51,83 +59,115 @@ class GatewayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_WAKE) {
-            flushSignal.trySend(Unit)
+        when (intent?.action) {
+            ACTION_WAKE -> flushTick.update { it + 1 }
+            ACTION_RELOAD -> {
+                // pairings changed: restart the loops with the new set
+                pollJob?.cancel()
+                pollJob = null
+            }
         }
         if (pollJob?.isActive != true) startLoops()
         return START_STICKY
     }
 
     private fun startLoops() {
-        val prefs = Prefs(this)
-        if (!prefs.isPaired) {
+        val pairings = Prefs(this).pairings
+        if (pairings.isEmpty()) {
             GatewayState.status(GatewayState.Status.ERROR, getString(R.string.not_paired))
             stopSelf()
             return
         }
-        val api = ApiClient(prefs.serverUrl, prefs.token)
+        GatewayState.status(GatewayState.Status.CONNECTING)
+        pollJob = scope.launch {
+            pairings.forEach { pairing -> launch { runLine(pairing) } }
+        }
+    }
+
+    private suspend fun runLine(pairing: Pairing) = coroutineScope {
+        val api = ApiClient(pairing.serverUrl, pairing.token)
+        val line = pairing.line
+        val tag = Lines.label(line).let { if (it.isEmpty()) "" else "[$it] " }
         var minDelayMs = 1500L
         var heartbeatSec = 30L
 
-        pollJob = scope.launch {
-            // heartbeat + flushing of pending reports
-            launch {
-                while (isActive) {
-                    try {
-                        val data = api.heartbeat(DeviceInfo.collect(this@GatewayService))
-                        data.optJSONObject("config")?.let {
-                            minDelayMs = it.optLong("min_delay_ms", minDelayMs)
-                            heartbeatSec = it.optLong("heartbeat_sec", heartbeatSec)
-                        }
-                        val enabled = data.optJSONObject("device")?.optBoolean("enabled", true) ?: true
-                        if (!enabled) GatewayState.status(GatewayState.Status.ERROR, getString(R.string.device_disabled))
-                    } catch (e: ApiException) {
-                        if (e.code == 401) {
-                            GatewayState.status(GatewayState.Status.ERROR, getString(R.string.token_invalid))
-                            GatewayState.log("✗ ${e.message}")
-                        }
-                    } catch (_: Exception) {
-                        // network issue; the poll loop reports it
-                    }
-                    runCatching { PendingQueue.flush(this@GatewayService, api) }
-                    withTimeoutOrNull(heartbeatSec * 1000) { flushSignal.receive() }
-                }
-            }
-
-            // long-poll for SMS to send
-            var backoff = 2000L
+        // heartbeat + flushing of pending reports
+        launch {
             while (isActive) {
                 try {
-                    GatewayState.status(GatewayState.Status.ONLINE, prefs.serverUrl)
-                    updateNotification(getString(R.string.status_online))
-                    val jobs = api.pollOutbox(waitSec = 25, limit = 5)
-                    backoff = 2000L
-                    for (job in jobs) {
-                        try {
-                            val route = SmsSender.send(this@GatewayService, job)
-                            GatewayState.log("↑ إرسال إلى ${job.to} عبر $route")
-                        } catch (e: Exception) {
-                            PendingQueue.addStatus(this@GatewayService, job.id, "failed", e.message ?: "send error")
-                            GatewayState.countFailed()
-                            GatewayState.log("✗ ${job.to}: ${e.message}")
-                        }
-                        delay(minDelayMs)
+                    val data = api.heartbeat(DeviceInfo.collect(this@GatewayService, pairing.sim))
+                    data.optJSONObject("config")?.let {
+                        minDelayMs = it.optLong("min_delay_ms", minDelayMs)
+                        heartbeatSec = it.optLong("heartbeat_sec", heartbeatSec)
                     }
-                    if (jobs.isNotEmpty()) flushSignal.trySend(Unit)
+                    val enabled = data.optJSONObject("device")?.optBoolean("enabled", true) ?: true
+                    if (!enabled) GatewayState.lineStatus(line, GatewayState.Status.ERROR, getString(R.string.device_disabled))
                 } catch (e: ApiException) {
-                    val msg = if (e.code == 401) getString(R.string.token_invalid) else e.message ?: "error"
-                    GatewayState.status(GatewayState.Status.ERROR, msg)
-                    updateNotification(msg)
-                    delay(if (e.code == 401) 60_000 else backoff)
-                    backoff = (backoff * 2).coerceAtMost(60_000)
-                } catch (e: Exception) {
-                    GatewayState.status(GatewayState.Status.CONNECTING, e.message ?: "")
-                    updateNotification(getString(R.string.status_reconnecting))
-                    delay(backoff)
-                    backoff = (backoff * 2).coerceAtMost(60_000)
+                    ensureActive()
+                    if (e.code == 401) {
+                        GatewayState.lineStatus(line, GatewayState.Status.ERROR, getString(R.string.token_invalid))
+                        GatewayState.log("$tag✗ ${e.message}")
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // network issue; the poll loop reports it
                 }
+                val seen = flushTick.value
+                runCatching { PendingQueue.flush(this@GatewayService, line, api) }
+                withTimeoutOrNull(heartbeatSec * 1000) { flushTick.first { it != seen } }
             }
         }
+
+        // long-poll for SMS to send
+        var backoff = 2000L
+        while (isActive) {
+            try {
+                GatewayState.lineStatus(line, GatewayState.Status.ONLINE, pairing.serverUrl)
+                refreshNotification()
+                val jobs = api.pollOutbox(waitSec = 25, limit = 5)
+                backoff = 2000L
+                for (job in jobs) {
+                    try {
+                        val route = SmsSender.send(this@GatewayService, job, line)
+                        GatewayState.log("$tag↑ إرسال إلى ${job.to} عبر $route")
+                    } catch (e: Exception) {
+                        PendingQueue.addStatus(this@GatewayService, line, job.id, "failed", e.message ?: "send error")
+                        GatewayState.countFailed()
+                        GatewayState.log("$tag✗ ${job.to}: ${e.message}")
+                    }
+                    delay(minDelayMs)
+                }
+                if (jobs.isNotEmpty()) flushTick.update { it + 1 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: ApiException) {
+                ensureActive() // a reloaded (unpaired) line must not report anymore
+                val msg = if (e.code == 401) getString(R.string.token_invalid) else e.message ?: "error"
+                GatewayState.lineStatus(line, GatewayState.Status.ERROR, msg)
+                refreshNotification()
+                delay(if (e.code == 401) 60_000 else backoff)
+                backoff = (backoff * 2).coerceAtMost(60_000)
+            } catch (e: Exception) {
+                ensureActive()
+                GatewayState.lineStatus(line, GatewayState.Status.CONNECTING, e.message ?: "")
+                refreshNotification()
+                delay(backoff)
+                backoff = (backoff * 2).coerceAtMost(60_000)
+            }
+        }
+    }
+
+    /** Notification text from the overall state (online if any SIM is online). */
+    private fun refreshNotification() {
+        val s = GatewayState.state.value
+        updateNotification(
+            when (s.status) {
+                GatewayState.Status.ONLINE -> getString(R.string.status_online)
+                GatewayState.Status.ERROR -> s.detail.ifBlank { getString(R.string.status_reconnecting) }
+                else -> getString(R.string.status_reconnecting)
+            },
+        )
     }
 
     override fun onDestroy() {
@@ -170,6 +210,7 @@ class GatewayService : Service() {
         private const val CHANNEL_ID = "gateway"
         private const val NOTIFICATION_ID = 1
         private const val ACTION_WAKE = "wake"
+        private const val ACTION_RELOAD = "reload"
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, GatewayService::class.java))
@@ -177,6 +218,18 @@ class GatewayService : Service() {
 
         fun stop(context: Context) {
             context.stopService(Intent(context, GatewayService::class.java))
+        }
+
+        /** Applies changed pairings: restarts the loops, or stops when nothing is left to run. */
+        fun reload(context: Context) {
+            val prefs = Prefs(context)
+            if (prefs.enabled && prefs.isPaired) {
+                ContextCompat.startForegroundService(
+                    context, Intent(context, GatewayService::class.java).setAction(ACTION_RELOAD),
+                )
+            } else {
+                stop(context)
+            }
         }
 
         /** Asks a running service to flush pending reports right away. */

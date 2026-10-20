@@ -6,14 +6,18 @@ import 'models.dart';
 abstract class Gateway {
   Stream<GatewaySnapshot> get snapshots;
   Future<GatewaySnapshot> current();
-  Future<void> savePairing(PairingData data, String deviceName);
-  Future<void> unpair();
+
+  /// Pairs [line] (a SIM slot "1", "2"… or "any") with a server device.
+  Future<void> savePairing(PairingData data, String deviceName, {String line = GatewayLine.any});
+
+  /// Unpairs one line, or every line when [line] is null.
+  Future<void> unpair({String? line});
   Future<void> setEnabled(bool enabled);
   Future<bool> isIgnoringBatteryOptimizations();
   Future<void> requestIgnoreBatteryOptimizations();
 
   /// Sends an SMS straight from this phone (not through the server). Returns the SIM used.
-  Future<String> sendTestSms(String to);
+  Future<String> sendTestSms(String to, {int? sim});
 }
 
 class NativeGateway implements Gateway {
@@ -30,11 +34,16 @@ class NativeGateway implements Gateway {
       GatewaySnapshot.fromMap(await _methods.invokeMethod<Map<dynamic, dynamic>>('getState') ?? const {});
 
   @override
-  Future<void> savePairing(PairingData data, String deviceName) =>
-      _methods.invokeMethod('pair', {'url': data.url, 'token': data.token, 'name': deviceName});
+  Future<void> savePairing(PairingData data, String deviceName, {String line = GatewayLine.any}) async {
+    try {
+      await _methods.invokeMethod('pair', {'url': data.url, 'token': data.token, 'name': deviceName, 'line': line});
+    } on PlatformException catch (e) {
+      throw Exception(e.message ?? e.code);
+    }
+  }
 
   @override
-  Future<void> unpair() => _methods.invokeMethod('unpair');
+  Future<void> unpair({String? line}) => _methods.invokeMethod('unpair', {'line': line});
 
   @override
   Future<void> setEnabled(bool enabled) => _methods.invokeMethod(enabled ? 'start' : 'stop');
@@ -47,9 +56,9 @@ class NativeGateway implements Gateway {
   Future<void> requestIgnoreBatteryOptimizations() => _methods.invokeMethod('requestIgnoreBattery');
 
   @override
-  Future<String> sendTestSms(String to) async {
+  Future<String> sendTestSms(String to, {int? sim}) async {
     try {
-      return await _methods.invokeMethod<String>('testSms', {'to': to}) ?? '';
+      return await _methods.invokeMethod<String>('testSms', {'to': to, 'sim': sim}) ?? '';
     } on PlatformException catch (e) {
       throw Exception(e.message ?? e.code);
     }

@@ -13,6 +13,7 @@ class SmsResultReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = intent.getStringExtra(SmsSender.EXTRA_ID) ?: return
         val storeUri = intent.getStringExtra(SmsSender.EXTRA_URI)?.let(Uri::parse)
+        val line = intent.getStringExtra(SmsSender.EXTRA_LINE) ?: Prefs.ANY
         if (SmsSender.isLocal(id)) {
             onLocalResult(context, intent, id, storeUri)
             return
@@ -23,11 +24,11 @@ class SmsResultReceiver : BroadcastReceiver() {
                 val outcome = SmsSender.onPartResult(id, error) ?: return
                 storeUri?.let { SmsStore.markSent(context, it, outcome.isEmpty(), resultCode) }
                 if (outcome.isEmpty()) {
-                    PendingQueue.addStatus(context, id, "sent")
+                    PendingQueue.addStatus(context, line, id, "sent")
                     GatewayState.countSent()
                     GatewayState.log("✓ أُرسلت $id")
                 } else {
-                    PendingQueue.addStatus(context, id, "failed", outcome)
+                    PendingQueue.addStatus(context, line, id, "failed", outcome)
                     GatewayState.countFailed()
                     GatewayState.log("✗ فشل $id: $outcome")
                 }
@@ -35,7 +36,7 @@ class SmsResultReceiver : BroadcastReceiver() {
             SmsSender.ACTION_DELIVERED -> {
                 if (isDelivered(intent)) {
                     storeUri?.let { SmsStore.markDelivered(context, it) }
-                    PendingQueue.addStatus(context, id, "delivered")
+                    PendingQueue.addStatus(context, line, id, "delivered")
                     GatewayState.log("✓✓ وصلت $id")
                 }
             }

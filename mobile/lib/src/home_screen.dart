@@ -79,33 +79,36 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _toast(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
-  Future<void> _pair(PairingData data) async {
+  Future<void> _pair(PairingData data, GatewayLine line) async {
     setState(() => _busy = true);
     try {
       final name = await widget.verify(data);
-      await widget.gateway.savePairing(data, name);
-      _toast('تم الربط بنجاح ✓');
+      await widget.gateway.savePairing(data, name, line: line.key);
+      _toast(line.isAnySim ? 'تم الربط بنجاح ✓' : 'تم ربط الشريحة ${line.slot} بنجاح ✓');
       if (!_smsGranted) await _requestPermissions();
       if (_smsGranted) await widget.gateway.setEnabled(true);
     } on PairingException catch (e) {
       _toast('فشل الربط: ${e.message}');
+    } catch (e) {
+      _toast('فشل الربط: ${e.toString().replaceFirst('Exception: ', '')}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _scan() async {
+  Future<void> _scan(GatewayLine line) async {
     if (widget.checkPermissions && !await Permission.camera.request().isGranted) {
       _toast('نحتاج صلاحية الكاميرا لمسح الرمز');
       return;
     }
     if (!mounted) return;
     final data = await Navigator.of(context).push<PairingData>(MaterialPageRoute(builder: (_) => const ScanScreen()));
-    if (data != null) await _pair(data);
+    if (data != null) await _pair(data, line);
   }
 
-  Future<void> _manual() async {
-    final url = TextEditingController(text: _state.serverUrl);
+  Future<void> _manual(GatewayLine line) async {
+    final known = _state.lines.map((l) => l.serverUrl).firstWhere((u) => u.isNotEmpty, orElse: () => '');
+    final url = TextEditingController(text: line.serverUrl.isNotEmpty ? line.serverUrl : known);
     final token = TextEditingController();
     final data = await showDialog<PairingData>(
       context: context,
@@ -113,7 +116,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         String? error;
         return StatefulBuilder(
           builder: (ctx, setLocal) => AlertDialog(
-            title: const Text('إدخال يدوي'),
+            title: Text(line.isAnySim ? 'إدخال يدوي' : 'إدخال يدوي — الشريحة ${line.slot}'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -150,7 +153,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       },
     );
-    if (data != null) await _pair(data);
+    if (data != null) await _pair(data, line);
   }
 
   Future<void> _toggle(bool on) async {
@@ -164,44 +167,72 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _testSms() async {
     final controller = TextEditingController();
+    final sims = _state.sims;
+    int? sim = sims.length >= 2 ? sims.first.slot : null;
     final to = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('رسالة تجريبية'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.phone,
-          textDirection: TextDirection.ltr,
-          decoration: const InputDecoration(labelText: 'رقم المستلم', hintText: '+9647701234567'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('رسالة تجريبية'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: controller,
+                keyboardType: TextInputType.phone,
+                textDirection: TextDirection.ltr,
+                decoration: const InputDecoration(labelText: 'رقم المستلم', hintText: '+9647701234567'),
+              ),
+              if (sims.length >= 2) ...[
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final s in sims)
+                      ChoiceChip(
+                        label: Text(_simTitle(s.slot, s.carrier)),
+                        selected: sim == s.slot,
+                        onSelected: (_) => setLocal(() => sim = s.slot),
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('إرسال')),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('إرسال')),
-        ],
       ),
     );
     if (to == null || to.isEmpty) return;
     try {
-      final sim = await widget.gateway.sendTestSms(to);
-      _toast('أُرسلت للشبكة عبر $sim — تابع النتيجة في سجل النشاط');
+      final route = await widget.gateway.sendTestSms(to, sim: sim);
+      _toast('أُرسلت للشبكة عبر $route — تابع النتيجة في سجل النشاط');
     } catch (e) {
       _toast('فشل الإرسال: ${e.toString().replaceFirst('Exception: ', '')}');
     }
   }
 
-  Future<void> _unpair() async {
+  Future<void> _unpair(GatewayLine line) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('إلغاء الربط؟'),
-        content: const Text('سيتوقف الهاتف عن إرسال الرسائل حتى تربطه من جديد.'),
+        title: Text(line.isAnySim ? 'إلغاء الربط؟' : 'إلغاء ربط الشريحة ${line.slot}؟'),
+        content: Text(
+          line.isAnySim
+              ? 'سيتوقف الهاتف عن إرسال الرسائل حتى تربطه من جديد.'
+              : 'ستتوقف هذه الشريحة عن الإرسال والاستقبال عبر السيرفر، والشرائح الأخرى تبقى تعمل.',
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('رجوع')),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('إلغاء الربط')),
         ],
       ),
     );
-    if (ok == true) await widget.gateway.unpair();
+    if (ok == true) await widget.gateway.unpair(line: line.key);
   }
 
   @override
@@ -215,8 +246,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           padding: const EdgeInsets.all(16),
           children: [
             _StatusCard(state: s, onToggle: s.paired && !_busy ? _toggle : null),
-            const SizedBox(height: 12),
-            _PairingCard(state: s, busy: _busy, onScan: _scan, onManual: _manual, onUnpair: _unpair),
+            for (final line in s.lines) ...[
+              const SizedBox(height: 12),
+              _PairingCard(
+                line: line,
+                multiSim: s.lines.length > 1 || s.sims.length > 1,
+                busy: _busy,
+                onScan: () => _scan(line),
+                onManual: () => _manual(line),
+                onUnpair: () => _unpair(line),
+              ),
+            ],
             if (widget.checkPermissions) ...[
               const SizedBox(height: 12),
               _SetupCard(
@@ -269,12 +309,7 @@ class _StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (label, color) = switch (state.status) {
-      GatewayStatus.online => ('متصلة وجاهزة للإرسال', Colors.green.shade600),
-      GatewayStatus.connecting => ('جارٍ الاتصال…', Colors.amber.shade700),
-      GatewayStatus.error => ('خطأ', Colors.red.shade600),
-      GatewayStatus.stopped => ('متوقفة', Colors.grey),
-    };
+    final (label, color) = _statusLook(state.status);
     final theme = Theme.of(context);
     return Card(
       child: Padding(
@@ -341,16 +376,28 @@ class _Stat extends StatelessWidget {
   }
 }
 
+String _simTitle(int slot, String carrier) => carrier.isEmpty ? 'الشريحة $slot' : 'الشريحة $slot · $carrier';
+
+(String, Color) _statusLook(GatewayStatus status) => switch (status) {
+  GatewayStatus.online => ('متصلة وجاهزة للإرسال', Colors.green.shade600),
+  GatewayStatus.connecting => ('جارٍ الاتصال…', Colors.amber.shade700),
+  GatewayStatus.error => ('خطأ', Colors.red.shade600),
+  GatewayStatus.stopped => ('متوقفة', Colors.grey),
+};
+
+/// Pairing of one line: the whole phone, or one SIM on a dual-SIM phone.
 class _PairingCard extends StatelessWidget {
   const _PairingCard({
-    required this.state,
+    required this.line,
+    required this.multiSim,
     required this.busy,
     required this.onScan,
     required this.onManual,
     required this.onUnpair,
   });
 
-  final GatewaySnapshot state;
+  final GatewayLine line;
+  final bool multiSim;
   final bool busy;
   final VoidCallback onScan;
   final VoidCallback onManual;
@@ -359,34 +406,76 @@ class _PairingCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final title = !multiSim
+        ? 'الربط مع السيرفر'
+        : line.isAnySim
+        ? 'كل الشرائح'
+        : _simTitle(line.slot, line.carrier);
+    final String info;
+    if (line.paired) {
+      info = 'مربوط بـ ${line.serverUrl}\nالجهاز: ${line.deviceName.isEmpty ? '—' : line.deviceName}';
+    } else if (!multiSim) {
+      info = 'الهاتف غير مربوط. أنشئ هاتفاً من لوحة التحكم وامسح رمز QR.';
+    } else {
+      info =
+          'غير مربوطة. أنشئ هاتفاً جديداً في لوحة التحكم لهذه الشريحة وامسح رمزه هنا، '
+          'فتعمل كجهاز مستقل: ترسل وتستقبل برقمها.';
+    }
+    final (statusLabel, statusColor) = _statusLook(line.status);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('الربط مع السيرفر', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 4),
-            Text(
-              state.paired
-                  ? 'مربوط بـ ${state.serverUrl}\nالجهاز: ${state.deviceName.isEmpty ? '—' : state.deviceName}'
-                  : 'الهاتف غير مربوط. أنشئ هاتفاً من لوحة التحكم وامسح رمز QR.',
-              style: theme.textTheme.bodySmall,
+            Row(
+              children: [
+                if (multiSim) ...[
+                  Icon(Icons.sim_card_outlined, size: 20, color: theme.colorScheme.primary),
+                  const SizedBox(width: 6),
+                ],
+                Expanded(child: Text(title, style: theme.textTheme.titleMedium)),
+                if (multiSim && line.paired) ...[
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(statusLabel, style: theme.textTheme.bodySmall),
+                ],
+              ],
             ),
+            const SizedBox(height: 4),
+            Text(info, style: theme.textTheme.bodySmall),
+            if (multiSim && line.paired && line.detail.isNotEmpty && line.status != GatewayStatus.online)
+              Text(line.detail, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
+            if (!line.present)
+              Text(
+                '⚠ هذه الشريحة غير موجودة في الهاتف الآن',
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+              ),
+            if (multiSim && line.isAnySim && line.paired)
+              Text(
+                'هذا ربط قديم يستخدم أي شريحة. للتحكم الكامل اربط كل شريحة برمز خاص بها ثم ألغِ هذا الربط.',
+                style: theme.textTheme.bodySmall,
+              ),
             const SizedBox(height: 12),
             if (busy) const LinearProgressIndicator(),
-            FilledButton.icon(
-              onPressed: busy ? null : onScan,
-              icon: const Icon(Icons.qr_code_scanner),
-              label: const Text('مسح رمز QR'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: busy ? null : onManual,
-              icon: const Icon(Icons.keyboard),
-              label: const Text('إدخال يدوي'),
-            ),
-            if (state.paired)
+            if (line.present || line.paired) ...[
+              FilledButton.icon(
+                onPressed: busy ? null : onScan,
+                icon: const Icon(Icons.qr_code_scanner),
+                label: Text(line.paired ? 'إعادة الربط برمز QR' : 'مسح رمز QR'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: busy ? null : onManual,
+                icon: const Icon(Icons.keyboard),
+                label: const Text('إدخال يدوي'),
+              ),
+            ],
+            if (line.paired)
               TextButton.icon(
                 onPressed: busy ? null : onUnpair,
                 icon: const Icon(Icons.link_off),

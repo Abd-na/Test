@@ -10,9 +10,19 @@ import android.telephony.SubscriptionManager
 import org.json.JSONArray
 import org.json.JSONObject
 
+data class SimCard(val slot: Int, val subscriptionId: Int, val carrier: String)
+
 object DeviceInfo {
+    /** Active SIMs, slot numbers starting at 1. Empty without READ_PHONE_STATE. */
     @SuppressLint("MissingPermission")
-    fun collect(context: Context): JSONObject {
+    fun sims(context: Context): List<SimCard> = runCatching {
+        context.getSystemService(SubscriptionManager::class.java)?.activeSubscriptionInfoList.orEmpty()
+            .map { SimCard(it.simSlotIndex + 1, it.subscriptionId, it.carrierName?.toString() ?: "") }
+            .sortedBy { it.slot }
+    }.getOrDefault(emptyList())
+
+    /** Heartbeat payload. With [sim] set only that SIM is reported (one server device per SIM). */
+    fun collect(context: Context, sim: Int? = null): JSONObject {
         val info = JSONObject()
             .put("model", "${Build.MANUFACTURER} ${Build.MODEL}")
             .put("app_version", BuildConfig.VERSION_NAME)
@@ -26,14 +36,11 @@ object DeviceInfo {
             info.put("charging", plugged != 0)
         }
 
-        runCatching {
-            val subs = context.getSystemService(SubscriptionManager::class.java)?.activeSubscriptionInfoList.orEmpty()
-            val sims = JSONArray()
-            subs.forEach { s ->
-                sims.put(JSONObject().put("slot", s.simSlotIndex + 1).put("carrier", s.carrierName?.toString() ?: ""))
-            }
-            info.put("sims", sims)
+        val sims = JSONArray()
+        sims(context).filter { sim == null || it.slot == sim }.forEach { s ->
+            sims.put(JSONObject().put("slot", s.slot).put("carrier", s.carrier))
         }
+        info.put("sims", sims)
         return info
     }
 }

@@ -346,6 +346,7 @@ views.devices = {
           <button class="btn primary" type="submit"><span data-icon="plus"></span>إضافة هاتف</button>
         </form>
         <p class="muted small">ثبّت تطبيق <b>Veta SMS Gateway</b> على هاتف أندرويد فيه شريحة، ثم امسح رمز الربط. الرسائل تُرسل من رصيد الشريحة مباشرة دون أي اشتراك.</p>
+        <p class="muted small">هاتف بشريحتين؟ أضف هاتفاً هنا <b>لكل شريحة</b> (مثال: «Samsung — SIM1» و«Samsung — SIM2») وامسح كل رمز في بطاقة شريحته داخل التطبيق؛ فتعمل كل شريحة كجهاز مستقل يرسل ويستقبل برقمه.</p>
       </div>
       <div class="grid" style="margin-top:16px">
         ${

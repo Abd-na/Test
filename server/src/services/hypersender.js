@@ -1,4 +1,4 @@
-import { one } from '../lib/db.js'
+import { one, parseJson } from '../lib/db.js'
 import { newId } from '../lib/ids.js'
 
 /**
@@ -65,13 +65,15 @@ const SMS_STATUS = {
 
 export function smsPhoneObject(device) {
   if (!device) return null
+  // the app reports only the SIM a device is paired to (one device per SIM on dual-SIM phones)
+  const sims = typeof device.sims === 'string' ? parseJson(device.sims, []) : (device.sims ?? [])
   const online = Boolean(device.online ?? (device.last_seen_at && Date.now() - new Date(device.last_seen_at) < 90_000))
   return {
     id: device.id,
     user_id: null,
     phone_number: null,
     name: device.name,
-    sim: 'SIM1',
+    sim: sims.length === 1 && sims[0]?.slot ? `SIM${sims[0].slot}` : 'SIM1',
     is_online: online,
     last_heartbeat_at: stamp(device.last_seen_at),
     created_at: stamp(device.created_at),

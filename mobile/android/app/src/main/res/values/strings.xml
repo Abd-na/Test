@@ -8,6 +8,8 @@
     <string name="status_reconnecting">انقطع الاتصال، إعادة المحاولة…</string>
     <string name="not_paired">الهاتف غير مربوط. أنشئ هاتفاً من لوحة التحكم وامسح رمز QR.</string>
     <string name="token_invalid">رمز الجهاز غير صالح أو تم حذفه</string>
+    <string name="all_sims">كل الشرائح</string>
+    <string name="token_used_by">هذا الرمز مربوط مسبقاً بـ %1$s. أنشئ هاتفاً جديداً في لوحة التحكم لكل شريحة.</string>
     <string name="device_disabled">الجهاز معطّل من لوحة التحكم</string>
     <string name="messages_channel">الرسائل الواردة</string>
     <string name="mms_title">رسالة وسائط (MMS)</string>

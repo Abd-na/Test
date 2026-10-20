@@ -53,22 +53,36 @@ class MainActivity : FlutterActivity() {
                 "getState" -> result.success(snapshot())
                 "pair" -> {
                     val url = call.argument<String>("url").orEmpty()
-                    val token = call.argument<String>("token").orEmpty()
+                    val token = call.argument<String>("token").orEmpty().trim()
+                    val line = call.argument<String>("line") ?: Prefs.ANY
                     if (url.isBlank() || token.isBlank()) {
                         result.error("invalid", "url and token are required", null)
                         return@setMethodCallHandler
                     }
-                    GatewayService.stop(this)
-                    prefs.serverUrl = url
-                    prefs.token = token
-                    prefs.deviceName = call.argument<String>("name").orEmpty()
-                    GatewayState.log("✓ تم الربط مع $url")
+                    // one server device = one SIM: the same token on two lines would mix their messages
+                    prefs.pairings.firstOrNull { it.token == token && it.line != line }?.let {
+                        val other = Lines.label(it.line).ifEmpty { getString(R.string.all_sims) }
+                        result.error("duplicate", getString(R.string.token_used_by, other), null)
+                        return@setMethodCallHandler
+                    }
+                    val previous = prefs.pairing(line)
+                    prefs.savePairing(line, url, token, call.argument<String>("name").orEmpty())
+                    // anything queued belongs to the device this line was paired with before
+                    if (previous != null && previous.token != token) PendingQueue.clear(this, line)
+                    val label = Lines.label(line).let { if (it.isEmpty()) "" else " ($it)" }
+                    GatewayState.log("✓ تم الربط مع $url$label")
+                    GatewayService.reload(this)
                     GatewayState.touch()
                     result.success(null)
                 }
                 "unpair" -> {
-                    GatewayService.stop(this)
-                    prefs.clearPairing()
+                    val line = call.argument<String>("line")
+                    val lines = if (line == null) prefs.pairings.map { it.line } else listOf(line)
+                    lines.forEach {
+                        prefs.clearPairing(it)
+                        PendingQueue.clear(this, it)
+                    }
+                    GatewayService.reload(this)
                     GatewayState.touch()
                     result.success(null)
                 }
@@ -268,6 +282,21 @@ class MainActivity : FlutterActivity() {
 
     private fun snapshot(): Map<String, Any> {
         val s = GatewayState.state.value
+        val first = prefs.pairings.firstOrNull()
+        val lines = Lines.list(this, prefs).map { l ->
+            val state = s.lines[l.key]
+            mapOf(
+                "key" to l.key,
+                "slot" to (l.sim?.slot ?: l.key.toIntOrNull() ?: 0),
+                "carrier" to (l.sim?.carrier ?: ""),
+                "present" to (l.key == Prefs.ANY || l.sim != null),
+                "paired" to (l.pairing != null),
+                "serverUrl" to (l.pairing?.serverUrl ?: ""),
+                "deviceName" to (l.pairing?.deviceName ?: ""),
+                "status" to (if (l.pairing == null) GatewayState.Status.STOPPED else state?.status ?: s.status).name,
+                "detail" to (state?.detail ?: ""),
+            )
+        }
         return mapOf(
             "status" to s.status.name,
             "detail" to s.detail,
@@ -278,9 +307,11 @@ class MainActivity : FlutterActivity() {
             "log" to s.log,
             "enabled" to prefs.enabled,
             "paired" to prefs.isPaired,
-            "serverUrl" to prefs.serverUrl,
-            "deviceName" to prefs.deviceName,
+            "serverUrl" to (first?.serverUrl ?: ""),
+            "deviceName" to (first?.deviceName ?: ""),
             "canSendSms" to SmsSender.hasSendPermission(this),
+            "lines" to lines,
+            "sims" to DeviceInfo.sims(this).map { mapOf("slot" to it.slot, "carrier" to it.carrier) },
         )
     }
 

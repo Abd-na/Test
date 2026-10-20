@@ -55,6 +55,33 @@ void main() {
       expect(s.status, GatewayStatus.stopped);
       expect(s.log, isEmpty);
     });
+
+    test('without per-SIM lines there is one "any SIM" line', () {
+      final s = GatewaySnapshot.fromMap({'status': 'ONLINE', 'paired': true, 'serverUrl': 'https://x.io'});
+      expect(s.lines, hasLength(1));
+      expect(s.lines.single.isAnySim, isTrue);
+      expect(s.lines.single.paired, isTrue);
+      expect(s.lines.single.serverUrl, 'https://x.io');
+    });
+
+    test('maps the SIMs and their lines', () {
+      final s = GatewaySnapshot.fromMap({
+        'status': 'ONLINE',
+        'sims': [
+          {'slot': 1, 'carrier': 'Zain'},
+          {'slot': 2, 'carrier': 'Asiacell'},
+        ],
+        'lines': [
+          {'key': '1', 'slot': 1, 'carrier': 'Zain', 'paired': true, 'status': 'ONLINE', 'present': true},
+          {'key': '2', 'slot': 2, 'carrier': 'Asiacell', 'paired': false, 'status': 'STOPPED', 'present': false},
+        ],
+      });
+      expect(s.sims.map((e) => e.slot), [1, 2]);
+      expect(s.lines.map((e) => e.key), ['1', '2']);
+      expect(s.lines.first.status, GatewayStatus.online);
+      expect(s.lines.first.isAnySim, isFalse);
+      expect(s.lines.last.present, isFalse);
+    });
   });
 
   group('verifyPairing', () {
